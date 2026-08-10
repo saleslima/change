@@ -1,0 +1,24 @@
+CivilOff N-DIT v9 — alterações na pasta civil02-integrado
+
+- Contraproposta usa calendário da escala da equipe do interessado.
+- Apenas dias em que a equipe está de serviço ficam selecionáveis; demais ficam foscos.
+- Contraproposta já exige assinatura do interessado.
+- Passo 1: interessado + solicitante.
+- Passo 2: Supervisor de cada equipe, com Ciente + assinatura.
+- Passo 3: Chefe de Operações de cada equipe, com Ciente + assinatura.
+- Status PENDENTE informa o passo/equipe em aberto; OK somente após os 3 passos.
+- Múltiplas propostas concorrentes continuam permitidas; ao escolher uma, mensagens das demais somem.
+- Cadastro: nome completo, nome de guerra, posto/graduação, RE, e-mail, equipe e perfil operacional.
+- RE validado no padrão 000000-0, último caractere 0-9/A/B.
+- Novos usuários entram com RE; CPF legado/admin continua compatível.
+- Perfil por posto/graduação conforme regra informada.
+- PWA/cache atualizado para v9.
+- Incluído INICIAR_LOCALHOST.bat.
+
+Arquivos principais atualizados:
+- index.html
+- access-admin.js
+- firebase-troca.js
+- styles.css
+- sw.js
+- README-INTEGRACAO.md

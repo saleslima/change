@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta id="themeColorMeta" name="theme-color" content="#07111f">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Escala de equipes e trocas de serviço do COPOM Civil, com calendário, propostas, assinaturas e funcionamento offline.">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CivilOff">
+
+  <title>CivilOff</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem('copomCivilTheme:v1');
+      document.documentElement.dataset.theme = savedTheme === 'light' ? 'light' : 'dark';
+
+      const savedOperationMode = localStorage.getItem('civilOffOperationMode:v1');
+      document.documentElement.dataset.operationMode = savedOperationMode === '193' ? '193' : '190';
+
+      const savedNeon = localStorage.getItem('civilOffNeonColor:v1');
+      if (/^#[0-9a-f]{6}$/i.test(savedNeon || '')) {
+        const value = savedNeon.slice(1);
+        const rgb = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
+        document.documentElement.style.setProperty('--neon', savedNeon);
+        document.documentElement.style.setProperty('--neon-rgb', rgb.join(', '));
+      }
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="grid-overlay" aria-hidden="true"></div>
+
+
+  <section id="authScreen" class="auth-screen" aria-label="Acesso ao CivilOff">
+    <div class="auth-card glass-card">
+      <div class="auth-brand">
+        <div class="auth-logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M18.2 2 6.9 17.2h7.2L12.8 30 25.1 13.8h-7.3L18.2 2Z"/></svg>
+        </div>
+        <div>
+          <p class="eyebrow">COPOM CIVIL</p>
+          <h1>CivilOff</h1>
+        </div>
+      </div>
+
+      <div id="authLoading" class="auth-loading">
+        <span class="loading-ring" aria-hidden="true"></span>
+        <span>Preparando acesso…</span>
+      </div>
+
+      <div id="loginPanel" hidden>
+        <div class="auth-heading">
+          <h2>Entrar no sistema</h2>
+          <p>Use seu RE e a senha numérica de 6 dígitos. O CPF continua aceito apenas para cadastros legados/administrativos.</p>
+        </div>
+        <form id="loginForm" class="auth-form" novalidate>
+          <label class="admin-field" for="loginCpf">
+            <span>RE</span>
+            <input id="loginCpf" name="identifier" type="text" inputmode="text" autocomplete="username" maxlength="14" placeholder="000000-0" required>
+            <small class="field-hint">Formato: 000000-0. O último caractere pode ser número, A ou B.</small>
+          </label>
+          <label class="admin-field" for="loginPassword">
+            <span>SENHA</span>
+            <input id="loginPassword" name="password" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+          </label>
+          <p id="loginStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+          <button class="auth-submit" type="submit">Entrar</button>
+          <button id="forgotPasswordButton" class="forgot-button" type="button">Esqueci minha senha</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="img"><path d="M18.2 2 6.9 17.2h7.2L12.8 30 25.1 13.8h-7.3L18.2 2Z"/></svg>
+        </div>
+        <div class="user-counter" aria-label="Dispositivos únicos cadastrados">
+          <svg viewBox="0 0 32 24" aria-hidden="true">
+            <circle cx="16" cy="6" r="4"></circle>
+            <circle cx="7" cy="8" r="3"></circle>
+            <circle cx="25" cy="8" r="3"></circle>
+            <path d="M9 22c.4-6 3-9 7-9s6.6 3 7 9M1.5 22c.3-4.4 2.2-6.8 5.5-6.8 1.5 0 2.7.5 3.6 1.4M30.5 22c-.3-4.4-2.2-6.8-5.5-6.8-1.5 0-2.7.5-3.6 1.4"></path>
+          </svg>
+          <strong id="userCount">—</strong>
+        </div>
+        <div>
+          <p class="eyebrow">COPOM CIVIL</p>
+          <h1>CivilOff</h1>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="installButton" class="icon-button install-button" type="button" aria-label="Instalar aplicativo" title="Instalar aplicativo">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M18.2 2 6.9 17.2h7.2L12.8 30 25.1 13.8h-7.3L18.2 2Z"/></svg>
+          <span>Instalar</span>
+        </button>
+
+        <button id="themeButton" class="icon-button theme-button" type="button" aria-label="Ativar modo dia" title="Modo dia" aria-pressed="false">
+          <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
+          </svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.2 15.2A8.5 8.5 0 0 1 8.8 3.8 8.5 8.5 0 1 0 20.2 15.2Z"></path>
+          </svg>
+        </button>
+        <div class="operation-switch" role="group" aria-label="Modo operacional">
+          <button id="mode190Button" class="operation-button active" type="button" aria-pressed="true">190</button>
+          <button id="mode193Button" class="operation-button emergency" type="button" aria-pressed="false">193</button>
+        </div>
+        <button id="neonButton" class="icon-button neon-button" type="button" aria-label="Escolher cor neon" title="Escolher cor neon" hidden>
+          <span class="neon-swatch" aria-hidden="true"></span>
+        </button>
+        <input id="neonColorInput" class="neon-color-input" type="color" value="#4bd5ff" aria-label="Cor neon do layout">
+      </div>
+    </header>
+
+    <section id="sessionBar" class="session-bar glass-card" aria-label="Usuário conectado" hidden>
+      <div class="session-user">
+        <span class="session-avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21c.5-5.2 3-8 7.5-8s7 2.8 7.5 8"></path></svg>
+        </span>
+        <span class="session-copy">
+          <strong id="currentUserName">Usuário</strong>
+          <small id="currentUserMeta">Perfil • Equipe</small>
+        </span>
+      </div>
+      <div class="session-actions">
+        <button id="trocaButton" class="troca-button" type="button" title="Solicitar troca" aria-label="Solicitar troca de serviço" hidden>
+          <img src="icons/troca.png" alt="" width="22" height="22" decoding="async">
+          <span>Troca</span>
+        </button>
+        <button id="trocaInboxButton" class="troca-inbox-button" type="button" title="Mensagens de troca" aria-label="Mensagens de troca" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zm0 0 8 7 8-7"></path></svg>
+          <span>Msgs</span>
+          <strong id="trocaInboxBadge" class="troca-badge" hidden>0</strong>
+        </button>
+        <button id="adminButton" class="admin-star-button" type="button" title="Administração" aria-label="Abrir administração" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.75 5.57 6.15.9-4.45 4.33 1.05 6.12L12 16.82l-5.5 2.9 1.05-6.12L3.1 9.27l6.15-.9L12 2.8Z"></path></svg>
+          <span>Admin</span>
+        </button>
+        <button id="logoutButton" class="logout-button" type="button">Sair</button>
+      </div>
+    </section>
+
+
+    <main>
+      <section class="status-card glass-card" aria-labelledby="statusTitle">
+        <div class="status-content">
+          <div class="thought-marquee" aria-label="Pensamento do dia">
+            <span id="dailyThought">Pensamento do dia</span>
+          </div>
+          <p class="section-label">ESCALA DE EQUIPES</p>
+          <h2 id="statusTitle">Calendário operacional</h2>
+          <p id="statusText" class="status-text">Toque em uma data para marcá-la em amarelo. A marcação permanece após recarregar.</p>
+        </div>
+        <div id="statusOrb" class="status-orb" aria-hidden="true"><span></span></div>
+      </section>
+
+      <section id="calendarPanel" class="calendar-panel glass-card" aria-labelledby="calendarTitle">
+        <div class="calendar-toolbar">
+          <button id="previousMonth" class="month-nav" type="button" aria-label="Mês anterior">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button id="monthPickerButton" class="month-title" type="button" aria-label="Escolher mês">
+            <span id="calendarTitle">Mês</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+          </button>
+          <input id="monthPicker" type="month" tabindex="-1" aria-hidden="true">
+          <button id="nextMonth" class="month-nav" type="button" aria-label="Próximo mês">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="team-calendar-legend" aria-label="Legenda">
+          <span><i class="legend-swatch selected"></i>Data marcada</span>
+          <span><i class="legend-swatch holiday"></i>Feriado</span>
+          <span><i class="legend-swatch event"></i>Ocorrência</span>
+        </div>
+
+        <div id="monthViewport" class="team-calendar-scroll">
+          <table class="team-calendar" aria-label="Escala mensal das equipes">
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Dia da semana</th>
+                <th>Equipe Dia</th>
+                <th>Equipe Noite</th>
+              </tr>
+            </thead>
+            <tbody id="teamCalendarBody"></tbody>
+          </table>
+        </div>
+
+        <p class="swipe-hint">Deslize a tabela no celular. Use as setas para mudar o mês.</p>
+        <button id="todayButton" class="text-button" type="button">Ir para hoje</button>
+      </section>
+    </main>
+
+    <footer>
+      <span class="footer-line"></span>
+      <p>Criador por <strong>N-DIT</strong></p>
+    </footer>
+  </div>
+
+
+
+
+
+  <dialog id="iosInstallDialog" class="app-dialog">
+    <form method="dialog">
+      <div class="dialog-icon bolt" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M18.2 2 6.9 17.2h7.2L12.8 30 25.1 13.8h-7.3L18.2 2Z"/></svg>
+      </div>
+      <h2>Instalar no iPhone/iPad</h2>
+      <p>No Safari, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
+      <button value="close" class="dialog-confirm full">Entendi</button>
+    </form>
+  </dialog>
+
+
+  <dialog id="trocaRequestDialog" class="app-dialog access-dialog troca-request-dialog">
+    <form id="trocaRequestForm" novalidate>
+      <div class="dialog-icon troca-dialog-icon" aria-hidden="true">
+        <img src="icons/troca.png" alt="" width="40" height="40" decoding="async">
+      </div>
+      <h2>Solicitar troca</h2>
+      <p>Escolha o dia que deseja trocar e uma ou mais equipes que poderão receber o pedido.</p>
+      <label class="admin-field" for="trocaDateInput">
+        <span>DIA QUE DESEJA TROCAR</span>
+        <input id="trocaDateInput" type="date" required>
+      </label>
+      <fieldset class="team-choice-fieldset">
+        <legend>EQUIPES DE DESTINO</legend>
+        <div id="trocaTeamChoices" class="team-choice-grid">
+          <label><input type="checkbox" name="targetTeam" value="A"><span>Equipe A</span></label>
+          <label><input type="checkbox" name="targetTeam" value="B"><span>Equipe B</span></label>
+          <label><input type="checkbox" name="targetTeam" value="C"><span>Equipe C</span></label>
+          <label><input type="checkbox" name="targetTeam" value="D"><span>Equipe D</span></label>
+          <label><input type="checkbox" name="targetTeam" value="E"><span>Equipe E</span></label>
+        </div>
+      </fieldset>
+      <p id="trocaRequestStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancelTrocaRequest" type="button" class="dialog-cancel">Cancelar</button>
+        <button type="submit" class="dialog-confirm access-confirm">Enviar pedido</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="trocaInboxDialog" class="app-dialog troca-inbox-dialog">
+    <div class="troca-inbox-shell">
+      <header class="troca-inbox-header">
+        <div>
+          <p class="section-label">TROCAS</p>
+          <h2>Mensagens e propostas</h2>
+        </div>
+        <button id="closeTrocaInbox" class="admin-close" type="button" aria-label="Fechar mensagens">×</button>
+      </header>
+      <p id="trocaInboxEmpty" class="troca-inbox-empty">Nenhuma mensagem de troca no momento.</p>
+      <div id="trocaInboxList" class="troca-inbox-list" aria-live="polite"></div>
+    </div>
+  </dialog>
+
+
+  <dialog id="trocaProposalDialog" class="app-dialog access-dialog troca-proposal-dialog">
+    <form id="trocaProposalForm" novalidate>
+      <div class="dialog-icon troca-dialog-icon" aria-hidden="true">
+        <img src="icons/troca.png" alt="" width="40" height="40" decoding="async">
+      </div>
+      <h2>Fazer contraproposta</h2>
+      <p id="trocaProposalIntro">Escolha um dos seus dias de serviço e assine a contraproposta.</p>
+
+      <section class="proposal-calendar-shell" aria-labelledby="proposalCalendarTitle">
+        <header class="proposal-calendar-header">
+          <button id="proposalPrevMonth" type="button" class="month-nav" aria-label="Mês anterior">‹</button>
+          <div>
+            <small>DIAS DISPONÍVEIS DA SUA EQUIPE</small>
+            <strong id="proposalCalendarTitle">Mês</strong>
+          </div>
+          <button id="proposalNextMonth" type="button" class="month-nav" aria-label="Próximo mês">›</button>
+        </header>
+        <div class="proposal-weekdays" aria-hidden="true">
+          <span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span>
+        </div>
+        <div id="proposalCalendarGrid" class="proposal-calendar-grid" role="grid" aria-label="Calendário de dias de serviço"></div>
+        <input id="trocaProposalDateInput" type="hidden" required>
+        <p id="proposalSelectedDate" class="proposal-selected-date">Selecione um dia iluminado no calendário.</p>
+        <p class="proposal-calendar-help">Dias em que sua equipe não está de serviço ficam foscos e não podem ser selecionados.</p>
+      </section>
+
+      <section class="proposal-signature-section">
+        <div class="proposal-signature-heading">
+          <span>PASSO 1 · ASSINATURA DO INTERESSADO</span>
+          <small>Ao enviar a contraproposta, sua assinatura já fica registrada no documento.</small>
+        </div>
+        <canvas id="trocaProposalSignature" class="troca-signature-canvas" aria-label="Assine sua contraproposta aqui"></canvas>
+        <button id="clearProposalSignature" type="button" class="troca-action close">Limpar assinatura</button>
+      </section>
+
+      <p id="trocaProposalStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancelTrocaProposal" type="button" class="dialog-cancel">Cancelar</button>
+        <button type="submit" class="dialog-confirm access-confirm">Assinar e enviar proposta</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="forgotPasswordDialog" class="app-dialog access-dialog">
+    <form id="forgotPasswordForm" novalidate>
+      <div class="dialog-icon access-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 17v.01M8.5 9.5a3.5 3.5 0 1 1 5.2 3.05c-1.1.63-1.7 1.27-1.7 2.45M4 4h16v16H4z"></path></svg>
+      </div>
+      <h2>Esqueci minha senha</h2>
+      <p>Informe o e-mail vinculado ao cadastro. Uma nova senha numérica será enviada.</p>
+      <label class="admin-field" for="forgotEmail">
+        <span>E-MAIL CADASTRADO</span>
+        <input id="forgotEmail" type="email" inputmode="email" autocomplete="email" placeholder="nome@exemplo.com" required>
+      </label>
+      <p id="forgotStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancelForgotPassword" type="button" class="dialog-cancel">Cancelar</button>
+        <button type="submit" class="dialog-confirm access-confirm">Enviar nova senha</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="adminDialog" class="admin-dialog">
+    <div class="admin-dialog-shell">
+      <header class="admin-dialog-header">
+        <div class="admin-title">
+          <span class="admin-title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m12 2.8 2.75 5.57 6.15.9-4.45 4.33 1.05 6.12L12 16.82l-5.5 2.9 1.05-6.12L3.1 9.27l6.15-.9L12 2.8Z"></path></svg>
+          </span>
+          <div>
+            <p class="section-label">ADMINISTRAÇÃO</p>
+            <h2>Usuários e equipes</h2>
+            <p id="firebaseProjectHint" class="admin-firebase-hint">Firebase: civilcop-ec5b1</p>
+          </div>
+        </div>
+        <button id="closeAdminButton" class="admin-close" type="button" aria-label="Fechar administração">×</button>
+      </header>
+
+      <nav class="admin-tabs" role="tablist" aria-label="Seções administrativas">
+        <button class="admin-tab active" type="button" role="tab" aria-selected="true" data-admin-tab="users">Usuários</button>
+        <button class="admin-tab" type="button" role="tab" aria-selected="false" data-admin-tab="shifts">Horários</button>
+        <button class="admin-tab" type="button" role="tab" aria-selected="false" data-admin-tab="trocas">
+          Trocas
+          <strong id="adminTrocasBadge" class="admin-tab-badge" hidden>0</strong>
+        </button>
+      </nav>
+
+      <div class="admin-content">
+        <section data-admin-panel="users">
+          <div id="emailConfigNotice" class="config-notice" hidden>
+            <strong>Envio de e-mail</strong>
+            <span>A senha é enviada ao e-mail do usuário (FormSubmit + EmailJS). No primeiro envio, o destinatário pode precisar confirmar o e-mail.</span>
+          </div>
+
+          <div class="admin-grid">
+            <form id="userForm" class="admin-form" novalidate>
+              <div class="admin-form-heading">
+                <h3>Cadastrar usuário</h3>
+                <p>A senha de 6 dígitos será gerada e enviada ao e-mail.</p>
+              </div>
+              <label class="admin-field" for="userName">
+                <span>NOME COMPLETO</span>
+                <input id="userName" type="text" autocomplete="name" maxlength="100" placeholder="Nome completo" required>
+              </label>
+              <label class="admin-field" for="userWarName">
+                <span>NOME DE GUERRA</span>
+                <input id="userWarName" type="text" autocomplete="off" maxlength="40" placeholder="Nome de guerra" required>
+              </label>
+              <label class="admin-field" for="userRank">
+                <span>POSTO / GRADUAÇÃO</span>
+                <select id="userRank" required>
+                  <option value="">Selecione</option>
+                  <option value="SD_PM">Sd PM</option>
+                  <option value="CB_PM">Cb PM</option>
+                  <option value="3SGT_PM">3º Sgt PM</option>
+                  <option value="2SGT_PM">2º Sgt PM</option>
+                  <option value="1SGT_PM">1º Sgt PM</option>
+                  <option value="SUBTEN_PM">Subten PM</option>
+                  <option value="2TEN_PM">2º Ten PM</option>
+                  <option value="1TEN_PM">1º Ten PM</option>
+                  <option value="CAP_PM">Cap PM</option>
+                  <option value="MAJ_PM">Maj PM</option>
+                  <option value="TEN_CEL_PM">Ten Cel PM</option>
+                  <option value="CEL_PM">Cel PM</option>
+                </select>
+              </label>
+              <label class="admin-field" for="userRe">
+                <span>RE</span>
+                <input id="userRe" type="text" inputmode="text" autocomplete="off" maxlength="8" placeholder="000000-0" required>
+                <small class="field-hint">6 números + hífen + número, A ou B.</small>
+              </label>
+              <label class="admin-field" for="userEmail">
+                <span>E-MAIL</span>
+                <input id="userEmail" type="email" inputmode="email" autocomplete="email" maxlength="120" placeholder="nome@exemplo.com" required>
+              </label>
+              <label class="admin-field" for="userShift">
+                <span>EQUIPE</span>
+                <select id="userShift" required>
+                  <option value="">Selecione uma equipe</option>
+                  <option value="A">Equipe A</option>
+                  <option value="B">Equipe B</option>
+                  <option value="C">Equipe C</option>
+                  <option value="D">Equipe D</option>
+                  <option value="E">Equipe E</option>
+                </select>
+              </label>
+              <label class="admin-field" for="userProfile">
+                <span>PERFIL</span>
+                <select id="userProfile" required>
+                  <option value="">Selecione o posto/graduação primeiro</option>
+                </select>
+                <small id="profileRuleHint" class="field-hint">Despachador: Sd PM–Cb PM · Supervisor: 3º Sgt PM–Subten PM · Chefe de Operações: 2º Ten PM–Cap PM.</small>
+              </label>
+              <p id="userFormStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+              <button class="admin-primary" type="submit">Cadastrar e enviar senha</button>
+            </form>
+
+            <div class="admin-list-panel">
+              <div class="admin-list-heading">
+                <div>
+                  <p class="section-label">CADASTRADOS</p>
+                  <h3>Usuários</h3>
+                </div>
+                <span id="userCountAdmin" class="admin-count">0</span>
+              </div>
+              <div id="userList" class="admin-list" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+
+        <section data-admin-panel="shifts" hidden>
+          <div class="admin-grid">
+            <form id="shiftForm" class="admin-form" novalidate>
+              <div class="admin-form-heading">
+                <h3>Cadastrar turno</h3>
+                <p>Informe um nome e a descrição do horário.</p>
+              </div>
+              <label class="admin-field" for="shiftName">
+                <span>NOME DO TURNO</span>
+                <input id="shiftName" type="text" maxlength="30" placeholder="Ex.: T-05A" required>
+              </label>
+              <label class="admin-field" for="shiftSchedule">
+                <span>HORÁRIO</span>
+                <input id="shiftSchedule" type="text" maxlength="60" placeholder="Ex.: 06:00 às 12:00" required>
+              </label>
+              <p id="shiftFormStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+              <button class="admin-primary" type="submit">Cadastrar turno</button>
+            </form>
+
+            <div class="admin-list-panel">
+              <div class="admin-list-heading">
+                <div>
+                  <p class="section-label">LISTA DE TURNOS</p>
+                  <h3>Disponíveis</h3>
+                </div>
+                <span id="shiftCountAdmin" class="admin-count">0</span>
+              </div>
+              <div id="shiftList" class="admin-list" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+
+        <section data-admin-panel="trocas" hidden>
+          <div class="admin-list-panel admin-trocas-panel">
+            <div class="admin-list-heading">
+              <div>
+                <p class="section-label">TROCAS EM ANDAMENTO</p>
+                <h3>Timeline de aprovação</h3>
+              </div>
+              <span id="trocaAdminCount" class="admin-count">0</span>
+            </div>
+            <p id="trocaAdminEmpty" class="troca-inbox-empty">Nenhuma troca com etapas pendentes no momento.</p>
+            <div id="trocaAdminList" class="admin-list" aria-live="polite"></div>
+          </div>
+
+          <div class="admin-list-panel admin-trocas-panel" style="margin-top: 16px;">
+            <div class="admin-list-heading">
+              <div>
+                <p class="section-label">DOCUMENTOS</p>
+                <h3>Concluídas — OK</h3>
+              </div>
+              <span id="trocaSignedCount" class="admin-count">0</span>
+            </div>
+            <p id="trocaSignedEmpty" class="troca-inbox-empty">Nenhuma troca concluiu os 3 passos ainda.</p>
+            <div id="trocaSignedList" class="admin-list" aria-live="polite"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="trocaDocDialog" class="app-dialog troca-doc-dialog">
+    <div class="troca-doc-shell">
+      <header class="troca-inbox-header">
+        <div>
+          <p class="section-label">DOCUMENTO INTERNO</p>
+          <h2>Termo de troca de serviço</h2>
+        </div>
+        <button id="closeTrocaDoc" class="admin-close" type="button" aria-label="Fechar documento">×</button>
+      </header>
+      <p class="troca-doc-disclaimer">Fluxo interno de troca: partes → supervisores → chefes de operações.</p>
+      <div id="trocaDocMeta" class="troca-doc-meta"></div>
+      <div id="trocaTimeline" class="troca-timeline" aria-label="Andamento da troca"></div>
+      <div id="trocaDocSignAreas" class="troca-doc-sign-areas"></div>
+      <p id="trocaDocStatus" class="form-status" role="status" aria-live="polite" hidden></p>
+    </div>
+  </dialog>
+
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script src="email-config.js?v=900"></script>
+  <script type="module" src="firebase-devices.js?v=900"></script>
+  <script type="module" src="access-admin.js?v=900"></script>
+  <script type="module" src="firebase-troca.js?v=900"></script>
+  <script src="app.js?v=900" defer></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+CIVILOFF - CONFIGURAÇÃO DO TEMPLATE EMAILJS
+============================================
+
+Template ID: template_w6zv5bj
+
+No painel EmailJS, configure os campos do template assim:
+
+To Email: {{to_email}}
+From Name: CivilOff
+Reply-To: {{reply_to}}
+Subject: {{subject}}
+
+IMPORTANTE (causa mais comum de "senha não chega"):
+O campo To Email PRECISA ser {{to_email}} (ou {{email}} / {{user_email}}).
+Se estiver com um e-mail fixo (ex.: stqcopomsp@gmail.com), o cadastro "funciona",
+mas a senha NÃO é enviada para o usuário cadastrado.
+
+CORPO RECOMENDADO (mais simples):
+
+{{message}}
+
+O sistema preenche {{message}} automaticamente com:
+- nome
+- CPF
+- senha de 6 dígitos
+- perfil
+- turno
+
+CORPO MANUAL (alternativa):
+
+Olá, {{to_name}}.
+
+Seu acesso ao {{app_name}} foi atualizado.
+CPF: {{cpf}}
+Senha: {{password}}
+Perfil: {{profile}}
+Turno: {{shift}}
+
+Use o CPF e a senha acima para entrar no sistema.
+Por segurança, não compartilhe esta senha.
+
+Depois de salvar o template, teste o envio no próprio painel do EmailJS
+com um to_email real e confira a caixa de entrada/spam.
