@@ -548,6 +548,47 @@ function renderSignedAdminList() {
   });
 }
 
+function publishTrocaCalendarDates() {
+  const dates = {};
+  const addDate = (iso, kind, docOrRequest) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return;
+    if (!dates[iso]) {
+      dates[iso] = {
+        kinds: [],
+        status: docOrRequest?.status || '',
+        pending: docOrRequest?.status !== 'completed',
+        shortLabel: 'TROCA',
+        label: ''
+      };
+    }
+    if (!dates[iso].kinds.includes(kind)) dates[iso].kinds.push(kind);
+    const parts = [];
+    if (dates[iso].kinds.includes('request')) parts.push('dia solicitado');
+    if (dates[iso].kinds.includes('counter')) parts.push('contrapartida');
+    dates[iso].shortLabel = dates[iso].kinds.length > 1
+      ? 'TROCA'
+      : (kind === 'request' ? 'TROCA PEDIDO' : 'TROCA CONTRA');
+    dates[iso].label = `${parts.join(' + ')} · ${docOrRequest?.status === 'completed' ? 'OK' : 'PENDENTE'}`;
+    dates[iso].pending = dates[iso].pending || docOrRequest?.status !== 'completed';
+  };
+
+  Object.values(myDocsCache || {}).forEach((doc) => {
+    addDate(doc.requestDate, 'request', doc);
+    addDate(doc.counterDate, 'counter', doc);
+  });
+
+  Object.values(myRequestsCache || {}).forEach((request) => {
+    if (request.documentId) return;
+    if (!['open', 'selected'].includes(request.status)) return;
+    addDate(request.requestDate, 'request', request);
+    if (request.counterDate) addDate(request.counterDate, 'counter', request);
+  });
+
+  document.dispatchEvent(new CustomEvent('civiloff:trocaschange', {
+    detail: { dates }
+  }));
+}
+
 function subscribeInbox() {
   if (unsubscribeInbox) unsubscribeInbox();
   if (unsubscribeMyDocs) unsubscribeMyDocs();
@@ -559,6 +600,7 @@ function subscribeInbox() {
   myDocsCache = {};
   myRequestsCache = {};
   updateBadge(0);
+  publishTrocaCalendarDates();
   renderInboxPanel();
   if (!currentUserKey || currentUser?.profile === 'admin') return;
 
@@ -577,6 +619,7 @@ function subscribeInbox() {
       }
     });
     myDocsCache = mine;
+    publishTrocaCalendarDates();
     refreshInboxBadge();
     if (els.inboxDialog?.open) renderVigentesList();
   }, (error) => console.warn('[CivilOff] Documentos vigentes:', error));
@@ -590,6 +633,7 @@ function subscribeInbox() {
       }
     });
     myRequestsCache = mine;
+    publishTrocaCalendarDates();
     refreshInboxBadge();
     if (els.inboxDialog?.open) renderVigentesList();
   }, (error) => console.warn('[CivilOff] Pedidos vigentes:', error));

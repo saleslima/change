@@ -4020,3 +4020,57 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
   color: inherit;
   opacity: .92;
 }
+
+.calendar-team-hint {
+  margin: 0 0 10px;
+  color: var(--muted, #8ba2b7);
+  font-size: .68rem;
+  line-height: 1.35;
+}
+.legend-swatch.my-duty {
+  border: 2px solid #3dff9a;
+  background: rgba(61, 255, 154, .18);
+  box-shadow: 0 0 8px rgba(61, 255, 154, .35);
+}
+.legend-swatch.troca {
+  background: linear-gradient(135deg, #ffb347, #ff7a18);
+  box-shadow: 0 0 8px rgba(255, 140, 40, .45);
+}
+.team-calendar tbody tr.is-my-duty .calendar-date-button {
+  border: 2px solid #3dff9a;
+  box-shadow: 0 0 14px rgba(61, 255, 154, .28), inset 0 0 10px rgba(61, 255, 154, .08);
+}
+.team-duty-cell.is-my-team .team-letter {
+  border-color: #3dff9a;
+  color: #b9ffd9;
+  background: rgba(61, 255, 154, .14);
+  box-shadow: 0 0 14px rgba(61, 255, 154, .22), inset 0 0 12px rgba(61, 255, 154, .1);
+}
+.team-calendar tbody tr.is-troca-day {
+  background: linear-gradient(90deg, rgba(255, 140, 40, .14), rgba(255, 140, 40, .04));
+  box-shadow: inset 4px 0 0 #ff9a2e;
+}
+.team-calendar tbody tr.is-troca-day.is-my-duty .calendar-date-button {
+  border-color: #ff9a2e;
+  box-shadow: 0 0 14px rgba(255, 154, 46, .3), 0 0 0 1px rgba(61, 255, 154, .45);
+}
+.calendar-troca-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #2b1600;
+  background: linear-gradient(135deg, #ffc15c, #ff9f1c);
+  font-size: .52rem;
+  font-weight: 850;
+  letter-spacing: .04em;
+}
+html[data-theme="light"] .team-calendar tbody tr.is-my-duty .calendar-date-button {
+  border-color: #12a866;
+  box-shadow: 0 0 10px rgba(18, 168, 102, .18);
+}
+html[data-theme="light"] .team-duty-cell.is-my-team .team-letter {
+  border-color: #12a866;
+  color: #0b6b42;
+  background: rgba(18, 168, 102, .12);
+}

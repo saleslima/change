@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.6-pendencias-passo';
+const CACHE_NAME = 'civiloff-v9.7-calendario-equipe';
 const APP_SHELL = [
   './',
   './index.html',

@@ -52,6 +52,24 @@ let visibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 
 let deferredInstallPrompt = null;
 let toastTimer = null;
 let taskMenu = null;
+let currentUserTeam = '';
+let trocaCalendarDates = {};
+
+function normalizeTeamLetter(value) {
+  const team = String(value || '').trim().toUpperCase();
+  return ['A', 'B', 'C', 'D', 'E'].includes(team) ? team : '';
+}
+
+function userTeamFromAuth(user) {
+  return normalizeTeamLetter(user?.team) || normalizeTeamLetter(user?.shiftId);
+}
+
+function teamIsOnDuty(team, date) {
+  const letter = normalizeTeamLetter(team);
+  if (!letter) return false;
+  const teams = getTeams(date);
+  return teams.day === letter || teams.night === letter;
+}
 
 function toLocalISO(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -206,9 +224,10 @@ function openTaskMenu(anchor, iso, column) {
   taskMenu = menu;
 }
 
-function makeTeamCell(team, iso, column, events) {
+function makeTeamCell(team, iso, column, events, myTeam) {
   const td = document.createElement('td');
   td.className = 'team-duty-cell';
+  if (myTeam && team === myTeam) td.classList.add('is-my-team');
   const badge = document.createElement('strong');
   badge.className = 'team-letter';
   badge.textContent = team;
@@ -228,6 +247,18 @@ function makeTeamCell(team, iso, column, events) {
   return td;
 }
 
+function updateCalendarTeamHint() {
+  const hint = document.querySelector('#calendarTeamHint');
+  if (!hint) return;
+  if (currentUserTeam) {
+    hint.hidden = false;
+    hint.textContent = `Equipe ${currentUserTeam}: dias de serviço com borda verde. Dias de troca marcados em laranja.`;
+  } else {
+    hint.hidden = false;
+    hint.textContent = 'Faça login para destacar os dias de serviço da sua equipe e as trocas.';
+  }
+}
+
 function renderCalendar() {
   if (!els.calendarBody) return;
   const year = visibleMonth.getFullYear();
@@ -240,16 +271,21 @@ function renderCalendar() {
   const highlights = loadHighlights();
   const events = loadEvents();
   const frag = document.createDocumentFragment();
+  updateCalendarTeamHint();
 
   for (let day = 1; day <= lastDay; day += 1) {
     const date = new Date(year, month, day, 12);
     const iso = toLocalISO(date);
     const teams = getTeams(date);
+    const myDuty = Boolean(currentUserTeam && teamIsOnDuty(currentUserTeam, date));
+    const trocaInfo = trocaCalendarDates[iso] || null;
     const tr = document.createElement('tr');
     tr.dataset.date = iso;
     if (iso === todayIso) tr.classList.add('is-today');
     if (highlights.has(iso)) tr.classList.add('is-highlighted');
     if (holidays.has(iso)) tr.classList.add('is-holiday');
+    if (myDuty) tr.classList.add('is-my-duty');
+    if (trocaInfo) tr.classList.add('is-troca-day');
 
     const dayCell = document.createElement('td');
     dayCell.className = 'calendar-date-cell';
@@ -258,6 +294,8 @@ function renderCalendar() {
     number.className = 'calendar-date-button';
     number.textContent = String(day).padStart(2, '0');
     number.title = highlights.has(iso) ? 'Remover marcação' : 'Marcar data em amarelo';
+    if (myDuty) number.title = `Dia de serviço da Equipe ${currentUserTeam}`;
+    if (trocaInfo) number.title = `${number.title} · Troca: ${trocaInfo.label}`;
     number.addEventListener('click', () => toggleDateHighlight(iso));
     dayCell.appendChild(number);
     if (holidays.has(iso)) {
@@ -266,16 +304,39 @@ function renderCalendar() {
       holiday.textContent = holidays.get(iso);
       dayCell.appendChild(holiday);
     }
+    if (trocaInfo) {
+      const trocaBadge = document.createElement('small');
+      trocaBadge.className = 'calendar-troca-badge';
+      trocaBadge.textContent = trocaInfo.shortLabel || 'TROCA';
+      dayCell.appendChild(trocaBadge);
+    }
 
     const weekCell = document.createElement('td');
     weekCell.textContent = weekDays[date.getDay()];
     if (date.getDay() === 0 || date.getDay() === 6) weekCell.classList.add('weekend-cell');
 
-    tr.append(dayCell, weekCell, makeTeamCell(teams.day, iso, 'day', events), makeTeamCell(teams.night, iso, 'night', events));
+    tr.append(
+      dayCell,
+      weekCell,
+      makeTeamCell(teams.day, iso, 'day', events, currentUserTeam),
+      makeTeamCell(teams.night, iso, 'night', events, currentUserTeam)
+    );
     frag.appendChild(tr);
   }
   els.calendarBody.replaceChildren(frag);
 }
+
+document.addEventListener('civiloff:authchange', (event) => {
+  const user = event.detail?.user || null;
+  currentUserTeam = userTeamFromAuth(user);
+  if (!user) trocaCalendarDates = {};
+  renderCalendar();
+});
+
+document.addEventListener('civiloff:trocaschange', (event) => {
+  trocaCalendarDates = event.detail?.dates || {};
+  renderCalendar();
+});
 
 function shiftMonth(amount) {
   visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + amount, 1, 12);
