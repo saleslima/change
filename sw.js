@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.0-fluxo-3-passos';
+const CACHE_NAME = 'civiloff-v9.1-calendario-pedido';
 const APP_SHELL = [
   './',
   './index.html',

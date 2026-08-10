@@ -238,11 +238,26 @@
         <img src="icons/troca.png" alt="" width="40" height="40" decoding="async">
       </div>
       <h2>Solicitar troca</h2>
-      <p>Escolha o dia que deseja trocar e uma ou mais equipes que poderão receber o pedido.</p>
-      <label class="admin-field" for="trocaDateInput">
-        <span>DIA QUE DESEJA TROCAR</span>
-        <input id="trocaDateInput" type="date" required>
-      </label>
+      <p>Escolha um dos seus dias de serviço e uma ou mais equipes que poderão receber o pedido.</p>
+
+      <section class="proposal-calendar-shell" aria-labelledby="requestCalendarTitle">
+        <header class="proposal-calendar-header">
+          <button id="requestPrevMonth" type="button" class="month-nav" aria-label="Mês anterior">‹</button>
+          <div>
+            <small>DIAS DISPONÍVEIS DA SUA EQUIPE</small>
+            <strong id="requestCalendarTitle">Mês</strong>
+          </div>
+          <button id="requestNextMonth" type="button" class="month-nav" aria-label="Próximo mês">›</button>
+        </header>
+        <div class="proposal-weekdays" aria-hidden="true">
+          <span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span>
+        </div>
+        <div id="requestCalendarGrid" class="proposal-calendar-grid" role="grid" aria-label="Calendário de dias de serviço do solicitante"></div>
+        <input id="trocaDateInput" type="hidden" required>
+        <p id="requestSelectedDate" class="proposal-selected-date">Selecione um dia iluminado no calendário.</p>
+        <p class="proposal-calendar-help">Somente os dias em que sua equipe está de serviço ficam disponíveis. Os demais permanecem foscos.</p>
+      </section>
+
       <fieldset class="team-choice-fieldset">
         <legend>EQUIPES DE DESTINO</legend>
         <div id="trocaTeamChoices" class="team-choice-grid">
@@ -528,10 +543,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="email-config.js?v=900"></script>
-  <script type="module" src="firebase-devices.js?v=900"></script>
-  <script type="module" src="access-admin.js?v=900"></script>
-  <script type="module" src="firebase-troca.js?v=900"></script>
-  <script src="app.js?v=900" defer></script>
+  <script src="email-config.js?v=901"></script>
+  <script type="module" src="firebase-devices.js?v=901"></script>
+  <script type="module" src="access-admin.js?v=901"></script>
+  <script type="module" src="firebase-troca.js?v=901"></script>
+  <script src="app.js?v=901" defer></script>
 </body>
 </html>

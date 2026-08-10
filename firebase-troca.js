@@ -31,6 +31,7 @@ let adminDocsCache = {};
 let openDocumentId = '';
 let activeProposalMessage = null;
 let proposalVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+let requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
 let jsPdfLoader = null;
 
 const els = {
@@ -40,6 +41,11 @@ const els = {
   requestDialog: document.querySelector('#trocaRequestDialog'),
   requestForm: document.querySelector('#trocaRequestForm'),
   requestDate: document.querySelector('#trocaDateInput'),
+  requestCalendarTitle: document.querySelector('#requestCalendarTitle'),
+  requestCalendarGrid: document.querySelector('#requestCalendarGrid'),
+  requestSelectedDate: document.querySelector('#requestSelectedDate'),
+  requestPrevMonth: document.querySelector('#requestPrevMonth'),
+  requestNextMonth: document.querySelector('#requestNextMonth'),
   teamChoices: document.querySelector('#trocaTeamChoices'),
   requestStatus: document.querySelector('#trocaRequestStatus'),
   cancelRequest: document.querySelector('#cancelTrocaRequest'),
@@ -424,6 +430,11 @@ async function createTrocaRequest(requestDate, targetTeams) {
   if (userProfile(currentUser) !== 'dispatcher') throw new Error('Somente o perfil Despachador solicita e participa diretamente das trocas.');
   const fromTeam = userTeam(currentUser);
   if (!fromTeam) throw new Error('Seu cadastro ainda não possui equipe.');
+  const requestDateObject = fromLocalISO(requestDate);
+  if (!requestDateObject || requestDate < todayIso()) throw new Error('Escolha um dia de serviço válido e não passado.');
+  if (!isTeamOnDuty(requestDateObject, fromTeam)) {
+    throw new Error(`Escolha um dia em que a Equipe ${fromTeam} esteja de serviço.`);
+  }
   const teams = [...new Set(targetTeams.map(normalizeTeam).filter((team) => team && team !== fromTeam))];
   if (!teams.length) throw new Error('Escolha pelo menos uma equipe diferente da sua.');
   const recipients = await findRecipients(teams, currentUserKey);
@@ -463,32 +474,42 @@ async function createTrocaRequest(requestDate, targetTeams) {
   return { requestId, teams, recipientCount: recipients.length };
 }
 
-function renderProposalCalendar() {
-  if (!els.proposalCalendarGrid || !activeProposalMessage) return;
+function renderDutyCalendar({
+  grid,
+  titleEl,
+  prevBtn,
+  nextBtn,
+  selectedInput,
+  selectedLabel,
+  visibleMonth,
+  blockedDates = [],
+  onSelect
+}) {
+  if (!grid) return;
   const team = userTeam(currentUser);
-  const requestDate = activeProposalMessage.requestDate || '';
-  const year = proposalVisibleMonth.getFullYear();
-  const month = proposalVisibleMonth.getMonth();
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
   const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
-  if (els.proposalPrevMonth) els.proposalPrevMonth.disabled = proposalVisibleMonth <= currentMonthStart;
-  if (els.proposalCalendarTitle) {
-    const label = monthFormatter.format(proposalVisibleMonth);
-    els.proposalCalendarTitle.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+  if (prevBtn) prevBtn.disabled = visibleMonth <= currentMonthStart;
+  if (titleEl) {
+    const label = monthFormatter.format(visibleMonth);
+    titleEl.textContent = label.charAt(0).toUpperCase() + label.slice(1);
   }
-  els.proposalCalendarGrid.replaceChildren();
+  grid.replaceChildren();
   const first = new Date(year, month, 1, 12);
   const lastDay = new Date(year, month + 1, 0, 12).getDate();
   for (let gap = 0; gap < first.getDay(); gap += 1) {
     const spacer = document.createElement('span');
     spacer.className = 'proposal-day-spacer';
-    els.proposalCalendarGrid.appendChild(spacer);
+    grid.appendChild(spacer);
   }
   const minIso = todayIso();
+  const blocked = new Set(blockedDates.filter(Boolean));
   for (let day = 1; day <= lastDay; day += 1) {
     const date = new Date(year, month, day, 12);
     const iso = toLocalISO(date);
     const onDuty = isTeamOnDuty(date, team);
-    const eligible = onDuty && iso >= minIso && iso !== requestDate;
+    const eligible = onDuty && iso >= minIso && !blocked.has(iso);
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'proposal-calendar-day';
@@ -497,15 +518,47 @@ function renderProposalCalendar() {
     button.disabled = !eligible;
     if (onDuty) button.classList.add('is-duty');
     if (!eligible) button.classList.add('is-dimmed');
-    if (els.proposalDate?.value === iso) button.classList.add('is-selected');
-    button.title = eligible ? `Equipe ${team} em serviço — selecionar ${formatDateBr(iso)}` : `Equipe ${team} não disponível para esta contraproposta`;
-    if (eligible) button.addEventListener('click', () => {
-      els.proposalDate.value = iso;
-      if (els.proposalSelectedDate) els.proposalSelectedDate.textContent = `Selecionado: ${formatDateBr(iso)} · Equipe ${team} em serviço.`;
-      renderProposalCalendar();
-    });
-    els.proposalCalendarGrid.appendChild(button);
+    if (selectedInput?.value === iso) button.classList.add('is-selected');
+    button.title = eligible
+      ? `Equipe ${team} em serviço — selecionar ${formatDateBr(iso)}`
+      : `Equipe ${team || '—'} não está de serviço neste dia`;
+    if (eligible) {
+      button.addEventListener('click', () => {
+        if (selectedInput) selectedInput.value = iso;
+        if (selectedLabel) selectedLabel.textContent = `Selecionado: ${formatDateBr(iso)} · Equipe ${team} em serviço.`;
+        onSelect?.();
+      });
+    }
+    grid.appendChild(button);
   }
+}
+
+function renderRequestCalendar() {
+  renderDutyCalendar({
+    grid: els.requestCalendarGrid,
+    titleEl: els.requestCalendarTitle,
+    prevBtn: els.requestPrevMonth,
+    nextBtn: els.requestNextMonth,
+    selectedInput: els.requestDate,
+    selectedLabel: els.requestSelectedDate,
+    visibleMonth: requestVisibleMonth,
+    onSelect: renderRequestCalendar
+  });
+}
+
+function renderProposalCalendar() {
+  if (!activeProposalMessage) return;
+  renderDutyCalendar({
+    grid: els.proposalCalendarGrid,
+    titleEl: els.proposalCalendarTitle,
+    prevBtn: els.proposalPrevMonth,
+    nextBtn: els.proposalNextMonth,
+    selectedInput: els.proposalDate,
+    selectedLabel: els.proposalSelectedDate,
+    visibleMonth: proposalVisibleMonth,
+    blockedDates: [activeProposalMessage.requestDate || ''],
+    onSelect: renderProposalCalendar
+  });
 }
 
 function isCanvasBlank(canvas) {
@@ -1306,11 +1359,13 @@ function openRequestDialog() {
     return;
   }
   setStatus(els.requestStatus);
-  if (els.requestDate) {
-    els.requestDate.value = todayIso();
-    els.requestDate.min = todayIso();
+  if (els.requestDate) els.requestDate.value = '';
+  if (els.requestSelectedDate) {
+    els.requestSelectedDate.textContent = `Selecione um dia iluminado. Somente a Equipe ${mine} em serviço.`;
   }
+  requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
   refreshTeamChoices();
+  renderRequestCalendar();
   els.requestDialog.showModal();
 }
 
@@ -1334,7 +1389,12 @@ async function handleRequestSubmit(event) {
   const requestDate = els.requestDate?.value || '';
   const teams = selectedTargetTeams();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(requestDate)) {
-    setStatus(els.requestStatus, 'Escolha o dia da troca.', 'error');
+    setStatus(els.requestStatus, 'Escolha um dia de serviço da sua equipe no calendário.', 'error');
+    return;
+  }
+  const requestDateObject = fromLocalISO(requestDate);
+  if (!requestDateObject || !isTeamOnDuty(requestDateObject, userTeam(currentUser))) {
+    setStatus(els.requestStatus, 'O dia escolhido precisa ser um dia de serviço da sua equipe.', 'error');
     return;
   }
   if (!teams.length) {
@@ -1367,6 +1427,14 @@ function bindEvents() {
   });
   els.requestForm?.addEventListener('submit', handleRequestSubmit);
   els.proposalForm?.addEventListener('submit', handleProposalSubmit);
+  els.requestPrevMonth?.addEventListener('click', () => {
+    requestVisibleMonth = new Date(requestVisibleMonth.getFullYear(), requestVisibleMonth.getMonth() - 1, 1, 12);
+    renderRequestCalendar();
+  });
+  els.requestNextMonth?.addEventListener('click', () => {
+    requestVisibleMonth = new Date(requestVisibleMonth.getFullYear(), requestVisibleMonth.getMonth() + 1, 1, 12);
+    renderRequestCalendar();
+  });
   els.proposalPrevMonth?.addEventListener('click', () => {
     proposalVisibleMonth = new Date(proposalVisibleMonth.getFullYear(), proposalVisibleMonth.getMonth() - 1, 1, 12);
     renderProposalCalendar();
