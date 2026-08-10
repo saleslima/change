@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.1-calendario-pedido';
+const CACHE_NAME = 'civiloff-v9.3-assinatura-passo1';
 const APP_SHELL = [
   './',
   './index.html',

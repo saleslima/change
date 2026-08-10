@@ -816,38 +816,100 @@ async function handleSelectProposal(message) {
   if (!message?.requestId || !message?.proposalId || !currentUserKey) return;
   try {
     const requestRef = ref(database, `${TROCAS_REQUESTS_PATH}/${message.requestId}`);
+
+    // Carrega o pedido no cache local antes da transação.
+    // Sem isso, o Firebase costuma chamar a transação com null e abortar.
+    const existingSnap = await get(requestRef);
+    const existing = existingSnap.val();
+    if (!existing) throw new Error('Pedido de troca não encontrado.');
+    if (existing.fromUserKey !== currentUserKey) {
+      throw new Error('Somente quem solicitou a troca pode aceitar a proposta.');
+    }
+    if (existing.status !== 'open') {
+      throw new Error(existing.status === 'selected' || existing.status === 'step1-requester'
+        ? 'Este pedido já teve uma proposta aceita.'
+        : 'Este pedido já foi encerrado.');
+    }
+
+    const proposalPath = `${TROCAS_PROPOSALS_PATH}/${message.requestId}/${message.proposalId}`;
+    const selectedSnap = await get(ref(database, proposalPath));
+    const selected = selectedSnap.val();
+    if (!selected?.interestedSignature) {
+      throw new Error('A proposta selecionada não possui assinatura válida do interessado.');
+    }
+    if (selected.status && !['pending', 'selected'].includes(selected.status)) {
+      throw new Error('Esta proposta não está mais disponível.');
+    }
+
     const tx = await runTransaction(requestRef, (request) => {
-      if (!request || request.status !== 'open' || request.fromUserKey !== currentUserKey) return;
+      // Se ainda vier null (corrida rara), devolve o snapshot conhecido para forçar nova tentativa.
+      if (request === null) {
+        return {
+          ...existing,
+          status: 'selected',
+          selectedProposalId: message.proposalId,
+          selectedBy: message.proposalBy || selected.proposalBy,
+          selectedByName: message.proposalByName || selected.proposalByName,
+          selectedTeam: message.proposalTeam || selected.proposalTeam,
+          counterDate: message.counterDate || selected.counterDate,
+          selectedAt: Date.now(),
+          updatedAt: Date.now()
+        };
+      }
+      if (request.status !== 'open' || request.fromUserKey !== currentUserKey) return;
       return {
         ...request,
         status: 'selected',
         selectedProposalId: message.proposalId,
-        selectedBy: message.proposalBy,
-        selectedByName: message.proposalByName,
-        selectedTeam: message.proposalTeam,
-        counterDate: message.counterDate,
+        selectedBy: message.proposalBy || selected.proposalBy,
+        selectedByName: message.proposalByName || selected.proposalByName,
+        selectedTeam: message.proposalTeam || selected.proposalTeam,
+        counterDate: message.counterDate || selected.counterDate,
         selectedAt: Date.now(),
         updatedAt: Date.now()
       };
     });
-    if (!tx.committed) throw new Error('Este pedido já foi encerrado ou outra proposta já foi escolhida.');
-    const request = tx.snapshot.val();
+
+    if (!tx.committed) {
+      const latest = (await get(requestRef)).val();
+      if (latest?.status === 'open' && latest?.fromUserKey === currentUserKey) {
+        // Fallback sem transação (ambiente com cache inconsistente).
+        await update(requestRef, {
+          status: 'selected',
+          selectedProposalId: message.proposalId,
+          selectedBy: message.proposalBy || selected.proposalBy,
+          selectedByName: message.proposalByName || selected.proposalByName,
+          selectedTeam: message.proposalTeam || selected.proposalTeam,
+          counterDate: message.counterDate || selected.counterDate,
+          selectedAt: Date.now(),
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        throw new Error('Este pedido já foi encerrado ou outra proposta já foi escolhida.');
+      }
+    }
+
+    const request = (await get(requestRef)).val() || tx.snapshot.val();
+    if (!request) throw new Error('Não foi possível carregar o pedido após o aceite.');
+
     const proposalsSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${message.requestId}`));
     const proposals = proposalsSnap.val() || {};
-    const selected = proposals[message.proposalId];
-    if (!selected?.interestedSignature) throw new Error('A proposta selecionada não possui assinatura válida do interessado.');
+    const selectedFresh = proposals[message.proposalId] || selected;
+    if (!selectedFresh?.interestedSignature) {
+      throw new Error('A proposta selecionada não possui assinatura válida do interessado.');
+    }
 
     await closeMessagesForRequest(message.requestId);
     const now = Date.now();
     const documentId = message.requestId;
     const requesterMessageId = push(ref(database, `${TROCAS_INBOX_PATH}/${request.fromUserKey}`)).key;
-    const selectedNoticeId = push(ref(database, `${TROCAS_INBOX_PATH}/${selected.proposalBy}`)).key;
+    const selectedNoticeId = push(ref(database, `${TROCAS_INBOX_PATH}/${selectedFresh.proposalBy}`)).key;
     const doc = {
       requestId: message.requestId,
       requestDate: request.requestDate,
-      counterDate: selected.counterDate,
+      counterDate: selectedFresh.counterDate,
       fromTeam: request.fromTeam,
-      interestedTeam: selected.proposalTeam,
+      interestedTeam: selectedFresh.proposalTeam,
       status: 'step1-requester',
       overallStatus: 'PENDENTE',
       pendingStep: 1,
@@ -864,17 +926,17 @@ async function handleSelectProposal(message) {
         signedAt: null
       },
       partyB: {
-        userKey: selected.proposalBy,
-        name: selected.proposalByName || 'Interessado',
-        warName: selected.proposalByWarName || '',
-        rank: selected.proposalByRank || '',
-        team: selected.proposalTeam || '',
+        userKey: selectedFresh.proposalBy,
+        name: selectedFresh.proposalByName || 'Interessado',
+        warName: selectedFresh.proposalByWarName || '',
+        rank: selectedFresh.proposalByRank || '',
+        team: selectedFresh.proposalTeam || '',
         role: 'interested',
-        signature: selected.interestedSignature,
-        signedAt: selected.interestedSignedAt || now
+        signature: selectedFresh.interestedSignature,
+        signedAt: selectedFresh.interestedSignedAt || now
       },
       steps: {
-        step1: { status: 'pending', interestedSignedAt: selected.interestedSignedAt || now, requesterSignedAt: null },
+        step1: { status: 'pending', interestedSignedAt: selectedFresh.interestedSignedAt || now, requesterSignedAt: null },
         step2: { status: 'pending' },
         step3: { status: 'pending' }
       },
@@ -897,18 +959,18 @@ async function handleSelectProposal(message) {
       requestId: message.requestId,
       documentId,
       requestDate: request.requestDate,
-      counterDate: selected.counterDate,
-      otherName: selected.proposalByWarName || selected.proposalByName || 'Interessado',
+      counterDate: selectedFresh.counterDate,
+      otherName: selectedFresh.proposalByWarName || selectedFresh.proposalByName || 'Interessado',
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
-    writes[`${TROCAS_INBOX_PATH}/${selected.proposalBy}/${selectedNoticeId}`] = {
+    writes[`${TROCAS_INBOX_PATH}/${selectedFresh.proposalBy}/${selectedNoticeId}`] = {
       kind: 'selected-notice',
       requestId: message.requestId,
       documentId,
       requestDate: request.requestDate,
-      counterDate: selected.counterDate,
+      counterDate: selectedFresh.counterDate,
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -1114,8 +1176,11 @@ async function openDocument(documentId) {
     const doc = snapshot.val();
     if (!doc) throw new Error('Documento não encontrado.');
     if (!canViewDocument(doc)) throw new Error('Você não tem acesso a este documento.');
-    renderDocument(doc);
     if (!els.docDialog.open) els.docDialog.showModal();
+    renderDocument(doc);
+    requestAnimationFrame(() => {
+      els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((canvas) => bindSignaturePad(canvas));
+    });
   } catch (error) {
     console.error(error);
     setStatus(els.docStatus);
@@ -1131,31 +1196,49 @@ async function saveRequesterSignature(canvas) {
   }
   setStatus(els.docStatus, 'Salvando assinatura do Passo 1…', 'loading');
   try {
+    const docRef = ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`);
+    const snap = await get(docRef);
+    const doc = snap.val();
+    if (!doc) throw new Error('Documento não encontrado.');
+    if (doc.status !== 'step1-requester') {
+      throw new Error(doc.partyA?.signature
+        ? 'Sua assinatura do Passo 1 já foi registrada.'
+        : 'Esta etapa de assinatura não está mais disponível.');
+    }
+    if (doc.partyA?.userKey !== currentUserKey) {
+      throw new Error('Somente o solicitante pode assinar este campo.');
+    }
+    if (doc.partyA?.signature) throw new Error('Sua assinatura do Passo 1 já foi registrada.');
+    if (!doc.partyB?.signature) throw new Error('A assinatura do interessado não está no documento.');
+
     const signature = exportSignature(canvas);
     const now = Date.now();
-    const tx = await runTransaction(ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`), (doc) => {
-      if (!doc || doc.status !== 'step1-requester' || doc.partyA?.userKey !== currentUserKey || doc.partyA?.signature) return;
-      doc.partyA.signature = signature;
-      doc.partyA.signedAt = now;
-      doc.steps = doc.steps || {};
-      doc.steps.step1 = { ...(doc.steps.step1 || {}), status: 'completed', requesterSignedAt: now, completedAt: now };
-      doc.status = 'step2-supervisors';
-      doc.overallStatus = 'PENDENTE';
-      doc.pendingStep = 2;
-      doc.updatedAt = now;
-      return doc;
-    });
-    if (!tx.committed) throw new Error('Esta assinatura não está mais disponível ou já foi registrada.');
-    const doc = tx.snapshot.val();
-    await closeMessagesForRequest(doc.requestId);
     await update(ref(database), {
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/partyA/signature`]: signature,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/partyA/signedAt`]: now,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/steps/step1`]: {
+        ...(doc.steps?.step1 || {}),
+        status: 'completed',
+        interestedSignedAt: doc.steps?.step1?.interestedSignedAt || doc.partyB?.signedAt || now,
+        requesterSignedAt: now,
+        completedAt: now
+      },
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/status`]: 'step2-supervisors',
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/overallStatus`]: 'PENDENTE',
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/pendingStep`]: 2,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/updatedAt`]: now,
       [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`]: 'step2-supervisors',
       [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`]: 2,
       [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`]: serverTimestamp()
     });
-    await dispatchApproverMessages(doc, 'supervisor');
-    const refreshed = (await get(ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`))).val();
+
+    const refreshed = (await get(docRef)).val();
+    await closeMessagesForRequest(refreshed.requestId);
+    await dispatchApproverMessages(refreshed, 'supervisor');
     renderDocument(refreshed);
+    requestAnimationFrame(() => {
+      els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((item) => bindSignaturePad(item));
+    });
     setStatus(els.docStatus, 'Passo 1 concluído. Supervisores das duas equipes receberam a solicitação de ciência e assinatura.', 'success');
   } catch (error) {
     console.error(error);
@@ -1170,93 +1253,103 @@ async function saveApprovalSignature(role, team, canvas) {
     return;
   }
   const normalizedTeam = normalizeTeam(team);
-  if (!canCurrentUserApprove({ status: role === 'supervisor' ? 'step2-supervisors' : 'step3-chiefs' }, role, normalizedTeam)) {
-    setStatus(els.docStatus, 'Seu perfil/equipe não permite assinar esta ciência.', 'error');
-    return;
-  }
   const isSupervisor = role === 'supervisor';
   const approvalKey = isSupervisor ? 'supervisors' : 'chiefs';
   const expectedStatus = isSupervisor ? 'step2-supervisors' : 'step3-chiefs';
-  const signature = exportSignature(canvas);
-  const now = Date.now();
+  if (userProfile(currentUser) !== role || userTeam(currentUser) !== normalizedTeam) {
+    setStatus(els.docStatus, 'Seu perfil/equipe não permite assinar esta ciência.', 'error');
+    return;
+  }
+
   setStatus(els.docStatus, `Registrando ciente do ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'}…`, 'loading');
   try {
-    let transitioned = false;
-    const tx = await runTransaction(ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`), (doc) => {
-      if (!doc || doc.status !== expectedStatus) return;
-      if (!teamPair(doc).includes(normalizedTeam)) return;
-      doc.approvals = doc.approvals || {};
-      doc.approvals[approvalKey] = doc.approvals[approvalKey] || {};
-      if (doc.approvals[approvalKey][normalizedTeam]?.signature) return;
-      doc.approvals[approvalKey][normalizedTeam] = {
-        userKey: currentUserKey,
-        name: currentUser.name || userDisplayName(currentUser),
-        warName: currentUser.warName || '',
-        rank: currentUser.rank || '',
-        team: normalizedTeam,
-        profile: role,
-        ciente: true,
-        signature,
-        signedAt: now
-      };
-      const teams = teamPair(doc);
-      const allDone = teams.every((t) => Boolean(doc.approvals[approvalKey]?.[t]?.signature));
-      doc.steps = doc.steps || {};
-      if (allDone) {
-        transitioned = true;
-        if (isSupervisor) {
-          doc.steps.step2 = { ...(doc.steps.step2 || {}), status: 'completed', completedAt: now };
-          doc.status = 'step3-chiefs';
-          doc.pendingStep = 3;
-        } else {
-          doc.steps.step3 = { ...(doc.steps.step3 || {}), status: 'completed', completedAt: now };
-          doc.status = 'completed';
-          doc.overallStatus = 'OK';
-          doc.pendingStep = null;
-          doc.completedAt = now;
-        }
-      }
-      doc.updatedAt = now;
-      return doc;
-    });
-    if (!tx.committed) throw new Error('Esta ciência já foi registrada ou a etapa mudou.');
-    const doc = tx.snapshot.val();
-    await closeApprovalMessages(openDocumentId, role, normalizedTeam);
+    const docRef = ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`);
+    const snap = await get(docRef);
+    const doc = snap.val();
+    if (!doc) throw new Error('Documento não encontrado.');
+    if (doc.status !== expectedStatus) throw new Error('Esta etapa ainda não está liberada ou já foi concluída.');
+    if (!teamPair(doc).includes(normalizedTeam)) throw new Error('Equipe inválida para esta ciência.');
+    if (doc.approvals?.[approvalKey]?.[normalizedTeam]?.signature) {
+      throw new Error('A ciência desta equipe já foi registrada.');
+    }
 
-    if (isSupervisor && doc.status === 'step3-chiefs') {
-      await update(ref(database), {
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`]: 'step3-chiefs',
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`]: 3,
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`]: serverTimestamp()
-      });
-      if (transitioned) await dispatchApproverMessages(doc, 'operations-chief');
-    } else if (!isSupervisor && doc.status === 'completed') {
-      await closeMessagesForRequest(doc.requestId);
-      const writes = {
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`]: 'completed',
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`]: null,
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/completedAt`]: serverTimestamp(),
-        [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`]: serverTimestamp()
-      };
-      [doc.partyA, doc.partyB].forEach((party) => {
+    const signature = exportSignature(canvas);
+    const now = Date.now();
+    const approvalRecord = {
+      userKey: currentUserKey,
+      name: currentUser.name || userDisplayName(currentUser),
+      warName: currentUser.warName || '',
+      rank: currentUser.rank || '',
+      team: normalizedTeam,
+      profile: role,
+      ciente: true,
+      signature,
+      signedAt: now
+    };
+    const nextApprovals = {
+      ...(doc.approvals || {}),
+      [approvalKey]: {
+        ...(doc.approvals?.[approvalKey] || {}),
+        [normalizedTeam]: approvalRecord
+      }
+    };
+    const teams = teamPair(doc);
+    const allDone = teams.every((item) => Boolean(nextApprovals[approvalKey]?.[item]?.signature));
+    const writes = {
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/approvals/${approvalKey}/${normalizedTeam}`]: approvalRecord,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/updatedAt`]: now
+    };
+
+    if (allDone && isSupervisor) {
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/steps/step2`] = { ...(doc.steps?.step2 || {}), status: 'completed', completedAt: now };
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/status`] = 'step3-chiefs';
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/pendingStep`] = 3;
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`] = 'step3-chiefs';
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`] = 3;
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`] = serverTimestamp();
+    } else if (allDone && !isSupervisor) {
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/steps/step3`] = { ...(doc.steps?.step3 || {}), status: 'completed', completedAt: now };
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/status`] = 'completed';
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/overallStatus`] = 'OK';
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/pendingStep`] = null;
+      writes[`${TROCAS_DOCS_PATH}/${openDocumentId}/completedAt`] = now;
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`] = 'completed';
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`] = null;
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/completedAt`] = serverTimestamp();
+      writes[`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`] = serverTimestamp();
+    }
+
+    await update(ref(database), writes);
+    await closeApprovalMessages(openDocumentId, role, normalizedTeam);
+    const refreshed = (await get(docRef)).val();
+
+    if (allDone && isSupervisor) {
+      await dispatchApproverMessages(refreshed, 'operations-chief');
+    } else if (allDone && !isSupervisor) {
+      await closeMessagesForRequest(refreshed.requestId);
+      const noticeWrites = {};
+      [refreshed.partyA, refreshed.partyB].forEach((party) => {
+        if (!party?.userKey) return;
         const noticeId = push(ref(database, `${TROCAS_INBOX_PATH}/${party.userKey}`)).key;
-        writes[`${TROCAS_INBOX_PATH}/${party.userKey}/${noticeId}`] = {
+        noticeWrites[`${TROCAS_INBOX_PATH}/${party.userKey}/${noticeId}`] = {
           kind: 'completed-notice',
-          requestId: doc.requestId,
+          requestId: refreshed.requestId,
           documentId: openDocumentId,
-          requestDate: doc.requestDate,
-          counterDate: doc.counterDate,
+          requestDate: refreshed.requestDate,
+          counterDate: refreshed.counterDate,
           noticeText: 'Passos 1, 2 e 3 concluídos. Status da troca: OK.',
           status: 'pending',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         };
       });
-      await update(ref(database), writes);
+      if (Object.keys(noticeWrites).length) await update(ref(database), noticeWrites);
     }
 
-    const refreshed = (await get(ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`))).val();
     renderDocument(refreshed);
+    requestAnimationFrame(() => {
+      els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((item) => bindSignaturePad(item));
+    });
     setStatus(els.docStatus, refreshed.status === 'completed'
       ? 'Passo 3 concluído. Todos os passos estão ticados e o status é OK.'
       : isSupervisor && refreshed.status === 'step3-chiefs'
