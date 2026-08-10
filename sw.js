@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.3-assinatura-passo1';
+const CACHE_NAME = 'civiloff-v9.6-pendencias-passo';
 const APP_SHELL = [
   './',
   './index.html',

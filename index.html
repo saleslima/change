@@ -281,12 +281,27 @@
       <header class="troca-inbox-header">
         <div>
           <p class="section-label">TROCAS</p>
-          <h2>Mensagens e propostas</h2>
+          <h2>Vigentes, mensagens e propostas</h2>
         </div>
         <button id="closeTrocaInbox" class="admin-close" type="button" aria-label="Fechar mensagens">×</button>
       </header>
-      <p id="trocaInboxEmpty" class="troca-inbox-empty">Nenhuma mensagem de troca no momento.</p>
-      <div id="trocaInboxList" class="troca-inbox-list" aria-live="polite"></div>
+
+      <section class="troca-vigentes-section" aria-label="Trocas vigentes">
+        <div class="troca-section-heading">
+          <p class="section-label">TROCAS VIGENTES</p>
+          <span id="trocaVigentesCount" class="admin-count">0</span>
+        </div>
+        <p id="trocaVigentesEmpty" class="troca-inbox-empty">Nenhuma troca vigente no momento.</p>
+        <div id="trocaVigentesList" class="troca-inbox-list troca-vigentes-list" aria-live="polite"></div>
+      </section>
+
+      <section class="troca-messages-section" aria-label="Mensagens de troca">
+        <div class="troca-section-heading">
+          <p class="section-label">MENSAGENS</p>
+        </div>
+        <p id="trocaInboxEmpty" class="troca-inbox-empty">Nenhuma mensagem de troca no momento.</p>
+        <div id="trocaInboxList" class="troca-inbox-list" aria-live="polite"></div>
+      </section>
     </div>
   </dialog>
 
@@ -543,10 +558,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="email-config.js?v=903"></script>
-  <script type="module" src="firebase-devices.js?v=903"></script>
-  <script type="module" src="access-admin.js?v=903"></script>
-  <script type="module" src="firebase-troca.js?v=903"></script>
-  <script src="app.js?v=903" defer></script>
+  <script src="email-config.js?v=906"></script>
+  <script type="module" src="firebase-devices.js?v=906"></script>
+  <script type="module" src="access-admin.js?v=906"></script>
+  <script type="module" src="firebase-troca.js?v=906"></script>
+  <script src="app.js?v=906" defer></script>
 </body>
 </html>

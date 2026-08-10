@@ -23,9 +23,13 @@ const monthFormatter = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: '
 let currentUserKey = '';
 let currentUser = null;
 let unsubscribeInbox = null;
+let unsubscribeMyDocs = null;
+let unsubscribeMyRequests = null;
 let unsubscribeAdminRequests = null;
 let unsubscribeAdminDocs = null;
 let inboxCache = {};
+let myDocsCache = {};
+let myRequestsCache = {};
 let adminRequestsCache = {};
 let adminDocsCache = {};
 let openDocumentId = '';
@@ -52,6 +56,9 @@ const els = {
   inboxDialog: document.querySelector('#trocaInboxDialog'),
   inboxList: document.querySelector('#trocaInboxList'),
   inboxEmpty: document.querySelector('#trocaInboxEmpty'),
+  vigentesList: document.querySelector('#trocaVigentesList'),
+  vigentesEmpty: document.querySelector('#trocaVigentesEmpty'),
+  vigentesCount: document.querySelector('#trocaVigentesCount'),
   closeInbox: document.querySelector('#closeTrocaInbox'),
   proposalDialog: document.querySelector('#trocaProposalDialog'),
   proposalForm: document.querySelector('#trocaProposalForm'),
@@ -172,11 +179,111 @@ function updateBadge(count) {
   }
 }
 
+function isTrocaVigenteForMe(doc) {
+  if (!doc || !currentUserKey) return false;
+  const iAmParty = [doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey);
+  if (!iAmParty) return false;
+  if (doc.status !== 'completed') return true;
+  return isWithinFulfillmentWindow(doc.requestDate, doc.counterDate);
+}
+
+function isOpenRequestVigenteForMe(request) {
+  if (!request || !currentUserKey) return false;
+  if (request.fromUserKey !== currentUserKey) return false;
+  if (request.documentId) return false;
+  return ['open', 'selected'].includes(request.status);
+}
+
+function myVigentes() {
+  const docs = Object.entries(myDocsCache)
+    .map(([id, doc]) => ({ id, ...doc, requestId: doc.requestId || id }))
+    .filter((doc) => isTrocaVigenteForMe(doc));
+  const openRequests = Object.entries(myRequestsCache)
+    .map(([id, request]) => ({ id, ...request }))
+    .filter((request) => isOpenRequestVigenteForMe(request))
+    .map((request) => ({
+      id: request.id,
+      requestId: request.id,
+      kind: 'open-request',
+      status: request.status,
+      requestDate: request.requestDate,
+      counterDate: request.counterDate || '',
+      fromTeam: request.fromTeam,
+      interestedTeam: request.selectedTeam || '',
+      partyA: { name: request.fromName, warName: request.fromWarName, userKey: request.fromUserKey },
+      partyB: { name: request.selectedByName || 'Aguardando proposta', warName: '', userKey: request.selectedBy || '' }
+    }));
+  return [...docs, ...openRequests].sort((a, b) => (
+    (Number(b.updatedAt) || Number(b.createdAt) || 0) - (Number(a.updatedAt) || Number(a.createdAt) || 0)
+  ));
+}
+
+function refreshInboxBadge() {
+  const messageCount = pendingMessages().length;
+  const vigentesCount = myVigentes().length;
+  updateBadge(messageCount + vigentesCount);
+}
+
+function renderVigentesList() {
+  if (!els.vigentesList) return;
+  const items = myVigentes();
+  els.vigentesList.replaceChildren();
+  if (els.vigentesEmpty) els.vigentesEmpty.hidden = items.length > 0;
+  if (els.vigentesCount) els.vigentesCount.textContent = String(items.length);
+
+  items.forEach((doc) => {
+    const card = document.createElement('article');
+    card.className = 'troca-message-card troca-tracking-card';
+    if (doc.status === 'completed') card.classList.add('is-ok');
+
+    const title = document.createElement('h3');
+    const meta = document.createElement('p');
+    meta.className = 'troca-message-meta';
+    const detail = document.createElement('p');
+    detail.className = 'troca-message-from';
+
+    const iAmRequester = doc.partyA?.userKey === currentUserKey;
+    const other = iAmRequester ? doc.partyB : doc.partyA;
+    const otherName = other?.warName || other?.name || 'Contraparte';
+
+    if (doc.kind === 'open-request') {
+      title.textContent = 'Pedido vigente · aguardando proposta';
+      meta.textContent = statusStepText(doc.status, doc);
+      detail.textContent = `Dia solicitado: ${formatDateBr(doc.requestDate)} · Equipe ${doc.fromTeam || '—'}`;
+    } else {
+      const isOk = doc.status === 'completed';
+      title.textContent = isOk ? 'Troca vigente · OK' : 'Troca vigente · PENDENTE';
+      meta.textContent = `${isOk ? 'OK · 3 passos concluídos' : pendingDetail(doc)} · Com ${otherName}.`;
+      detail.textContent = `Cumprimento: ${formatDateBr(doc.requestDate)} ↔ ${formatDateBr(doc.counterDate || '—')} · Equipes ${doc.fromTeam || '—'} / ${doc.interestedTeam || '—'}`;
+    }
+
+    card.append(title, meta, detail);
+    const actions = document.createElement('div');
+    actions.className = 'troca-message-actions';
+    if (doc.kind !== 'open-request') {
+      addAction(actions, 'Ver status / documento', 'accept', () => openDocument(doc.id || doc.requestId));
+      card.appendChild(actions);
+    }
+    els.vigentesList.appendChild(card);
+  });
+}
+
 function pendingMessages() {
   return Object.entries(inboxCache)
     .map(([id, message]) => ({ id, ...message }))
-    .filter((message) => !message.status || message.status === 'pending')
-    .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    .filter((message) => {
+      if (message.status && message.status !== 'pending') return false;
+      // Tracking fica na seção de vigentes; evita duplicar no bloco de mensagens.
+      if (message.kind === 'troca-tracking') return false;
+      return true;
+    })
+    .sort((a, b) => (Number(b.updatedAt) || Number(b.createdAt) || 0) - (Number(a.updatedAt) || Number(a.createdAt) || 0));
+}
+
+function renderInboxPanel() {
+  renderVigentesList();
+  renderInboxList();
+  refreshInboxBadge();
 }
 
 function pendingAdminRequests() {
@@ -222,6 +329,63 @@ function statusStepText(status, requestOrDoc = {}) {
   return requestOrDoc.pendingStep ? `PENDENTE · Passo ${requestOrDoc.pendingStep}` : 'PENDENTE';
 }
 
+function fulfillmentEndIso(requestDate, counterDate) {
+  const dates = [requestDate, counterDate].filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value || '')).sort();
+  return dates.length ? dates[dates.length - 1] : '';
+}
+
+function isWithinFulfillmentWindow(requestDate, counterDate) {
+  const end = fulfillmentEndIso(requestDate, counterDate);
+  return Boolean(end && todayIso() <= end);
+}
+
+function trackingMessageId(requestId) {
+  return `track_${String(requestId || '').replace(/[^A-Za-z0-9_-]/g, '_')}`;
+}
+
+function buildTrackingPayload(doc, partyRole) {
+  const overall = doc.status === 'completed' ? 'OK' : 'PENDENTE';
+  const statusText = doc.status === 'completed' ? 'OK · 3 passos concluídos' : pendingDetail(doc);
+  const other = partyRole === 'requester' ? doc.partyB : doc.partyA;
+  return {
+    kind: 'troca-tracking',
+    requestId: doc.requestId,
+    documentId: doc.requestId || openDocumentId,
+    requestDate: doc.requestDate,
+    counterDate: doc.counterDate,
+    fromTeam: doc.fromTeam || '',
+    interestedTeam: doc.interestedTeam || '',
+    partyRole,
+    otherName: other?.warName || other?.name || 'Contraparte',
+    docStatus: doc.status || '',
+    overallStatus: overall,
+    statusText,
+    visibleUntil: fulfillmentEndIso(doc.requestDate, doc.counterDate),
+    pinUntilFulfillment: true,
+    status: 'pending',
+    updatedAt: serverTimestamp()
+  };
+}
+
+async function upsertPartyTracking(doc) {
+  if (!doc?.requestId || !doc?.partyA?.userKey || !doc?.partyB?.userKey) return;
+  if (!isWithinFulfillmentWindow(doc.requestDate, doc.counterDate) && doc.status !== 'completed') {
+    // ainda assim grava se estiver em andamento sem datas válidas
+  }
+  const messageId = trackingMessageId(doc.requestId);
+  const writes = {};
+  [
+    [doc.partyA.userKey, 'requester'],
+    [doc.partyB.userKey, 'interested']
+  ].forEach(([userKey, partyRole]) => {
+    writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}`] = {
+      ...buildTrackingPayload(doc, partyRole),
+      createdAt: serverTimestamp()
+    };
+  });
+  await update(ref(database), writes);
+}
+
 function renderInboxList() {
   if (!els.inboxList) return;
   const messages = pendingMessages();
@@ -256,6 +420,11 @@ function renderInboxList() {
       title.textContent = 'Sua contraproposta foi escolhida';
       meta.textContent = 'Sua assinatura do Passo 1 já está registrada. Agora o solicitante precisa assinar.';
       detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+    } else if (message.kind === 'troca-tracking') {
+      const isOk = message.overallStatus === 'OK' || message.docStatus === 'completed';
+      title.textContent = isOk ? 'Troca acompanhada · OK' : 'Troca em acompanhamento · PENDENTE';
+      meta.textContent = `${message.statusText || statusStepText(message.docStatus)} · Com ${message.otherName || 'contraparte'}.`;
+      detail.textContent = `Cumprimento: ${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)} · Disponível até ${formatDateBr(message.visibleUntil || fulfillmentEndIso(message.requestDate, message.counterDate))}.`;
     } else if (message.kind === 'completed-notice') {
       title.textContent = 'Troca concluída · OK';
       meta.textContent = message.noticeText || 'Os 3 passos foram concluídos.';
@@ -270,6 +439,11 @@ function renderInboxList() {
       detail.textContent = `Você recebeu este pedido como Despachador da Equipe ${message.recipientTeam || userTeam(currentUser) || '—'}. Escolha um dos dias em que sua equipe está de serviço.`;
     }
 
+    if (message.kind === 'troca-tracking') {
+      card.classList.add('troca-tracking-card');
+      if (message.overallStatus === 'OK' || message.docStatus === 'completed') card.classList.add('is-ok');
+    }
+
     card.append(title, meta, detail);
     const actions = document.createElement('div');
     actions.className = 'troca-message-actions';
@@ -278,10 +452,16 @@ function renderInboxList() {
     } else if (message.kind === 'proposal') {
       addAction(actions, 'Aceitar proposta', 'accept', () => handleSelectProposal(message));
       addAction(actions, 'Rejeitar', 'remove', () => handleRejectProposal(message));
-    } else if (['sign-request', 'approval-request', 'completed-notice', 'selected-notice'].includes(message.kind) && message.documentId) {
-      addAction(actions, message.kind === 'completed-notice' ? 'Visualizar' : 'Abrir documento', 'accept', () => openDocument(message.documentId));
+    } else if (['sign-request', 'approval-request', 'completed-notice', 'selected-notice', 'troca-tracking'].includes(message.kind) && message.documentId) {
+      addAction(actions, message.kind === 'completed-notice' || message.kind === 'troca-tracking' ? 'Ver status / documento' : 'Abrir documento', 'accept', () => openDocument(message.documentId));
     }
-    if (!['proposal'].includes(message.kind)) addAction(actions, 'Fechar', 'close', () => handleClose(message));
+    if (message.kind === 'troca-tracking') {
+      if (!isWithinFulfillmentWindow(message.requestDate, message.counterDate)) {
+        addAction(actions, 'Arquivar', 'close', () => handleClose(message));
+      }
+    } else if (!['proposal'].includes(message.kind)) {
+      addAction(actions, 'Fechar', 'close', () => handleClose(message));
+    }
     card.appendChild(actions);
     els.inboxList.appendChild(card);
   });
@@ -370,16 +550,49 @@ function renderSignedAdminList() {
 
 function subscribeInbox() {
   if (unsubscribeInbox) unsubscribeInbox();
+  if (unsubscribeMyDocs) unsubscribeMyDocs();
+  if (unsubscribeMyRequests) unsubscribeMyRequests();
   unsubscribeInbox = null;
+  unsubscribeMyDocs = null;
+  unsubscribeMyRequests = null;
   inboxCache = {};
+  myDocsCache = {};
+  myRequestsCache = {};
   updateBadge(0);
-  renderInboxList();
-  if (!currentUserKey) return;
+  renderInboxPanel();
+  if (!currentUserKey || currentUser?.profile === 'admin') return;
+
   unsubscribeInbox = onValue(ref(database, `${TROCAS_INBOX_PATH}/${currentUserKey}`), (snapshot) => {
     inboxCache = snapshot.val() || {};
-    updateBadge(pendingMessages().length);
-    if (els.inboxDialog?.open) renderInboxList();
+    refreshInboxBadge();
+    if (els.inboxDialog?.open) renderInboxPanel();
   }, (error) => console.warn('[CivilOff] Inbox de troca:', error));
+
+  unsubscribeMyDocs = onValue(ref(database, TROCAS_DOCS_PATH), (snapshot) => {
+    const all = snapshot.val() || {};
+    const mine = {};
+    Object.entries(all).forEach(([id, doc]) => {
+      if ([doc?.partyA?.userKey, doc?.partyB?.userKey].includes(currentUserKey)) {
+        mine[id] = doc;
+      }
+    });
+    myDocsCache = mine;
+    refreshInboxBadge();
+    if (els.inboxDialog?.open) renderVigentesList();
+  }, (error) => console.warn('[CivilOff] Documentos vigentes:', error));
+
+  unsubscribeMyRequests = onValue(ref(database, TROCAS_REQUESTS_PATH), (snapshot) => {
+    const all = snapshot.val() || {};
+    const mine = {};
+    Object.entries(all).forEach(([id, request]) => {
+      if (request?.fromUserKey === currentUserKey || request?.selectedBy === currentUserKey) {
+        mine[id] = request;
+      }
+    });
+    myRequestsCache = mine;
+    refreshInboxBadge();
+    if (els.inboxDialog?.open) renderVigentesList();
+  }, (error) => console.warn('[CivilOff] Pedidos vigentes:', error));
 }
 
 function subscribeAdminRequests() {
@@ -772,7 +985,9 @@ async function removeMessagesByPredicate(predicate) {
 }
 
 async function closeMessagesForRequest(requestId) {
-  await removeMessagesByPredicate((message) => message?.requestId === requestId);
+  await removeMessagesByPredicate((message) => (
+    message?.requestId === requestId && message?.kind !== 'troca-tracking'
+  ));
 }
 
 async function closeApprovalMessages(documentId, approvalRole, approvalTeam) {
@@ -976,6 +1191,8 @@ async function handleSelectProposal(message) {
       updatedAt: serverTimestamp()
     };
     await update(ref(database), writes);
+    const savedDoc = (await get(ref(database, `${TROCAS_DOCS_PATH}/${documentId}`))).val() || doc;
+    await upsertPartyTracking(savedDoc);
     await openDocument(documentId);
   } catch (error) {
     console.error(error);
@@ -991,36 +1208,132 @@ function stepCompletion(doc) {
   return { step1, step2, step3 };
 }
 
+function personLabel(person, fallback = '—') {
+  if (!person) return fallback;
+  const rank = person.rank ? `${String(person.rank).replaceAll('_', ' ')} ` : '';
+  return `${rank}${person.warName || person.name || fallback}`.trim();
+}
+
+function teamSideLabel(doc, team) {
+  if (team === doc?.fromTeam) return `Equipe ${team} · solicitante`;
+  if (team === doc?.interestedTeam) return `Equipe ${team} · interessado`;
+  return `Equipe ${team || '—'}`;
+}
+
+function stepPeopleStatus(doc) {
+  const teams = teamPair(doc);
+  const step1 = [
+    {
+      role: 'Interessado',
+      name: personLabel(doc?.partyB, 'Interessado'),
+      teamLabel: teamSideLabel(doc, doc?.partyB?.team || doc?.interestedTeam),
+      done: Boolean(doc?.partyB?.signature),
+      signedBy: doc?.partyB?.signature ? personLabel(doc.partyB) : ''
+    },
+    {
+      role: 'Solicitante',
+      name: personLabel(doc?.partyA, 'Solicitante'),
+      teamLabel: teamSideLabel(doc, doc?.partyA?.team || doc?.fromTeam),
+      done: Boolean(doc?.partyA?.signature),
+      signedBy: doc?.partyA?.signature ? personLabel(doc.partyA) : ''
+    }
+  ];
+
+  const step2 = teams.map((team) => {
+    const approval = doc?.approvals?.supervisors?.[team];
+    const missingCadastro = Number(doc?.approvalAvailability?.supervisor?.[team] || 0) === 0 && !approval?.signature;
+    return {
+      role: 'Supervisor',
+      name: approval?.warName || approval?.name || `Supervisor da Equipe ${team}`,
+      teamLabel: teamSideLabel(doc, team),
+      done: Boolean(approval?.signature),
+      signedBy: approval?.signature ? personLabel(approval) : '',
+      missingCadastro
+    };
+  });
+
+  const step3 = teams.map((team) => {
+    const approval = doc?.approvals?.chiefs?.[team];
+    const missingCadastro = Number(doc?.approvalAvailability?.['operations-chief']?.[team] || 0) === 0 && !approval?.signature;
+    return {
+      role: 'Chefe de Operações',
+      name: approval?.warName || approval?.name || `Chefe de Operações da Equipe ${team}`,
+      teamLabel: teamSideLabel(doc, team),
+      done: Boolean(approval?.signature),
+      signedBy: approval?.signature ? personLabel(approval) : '',
+      missingCadastro
+    };
+  });
+
+  return { step1, step2, step3 };
+}
+
+function formatPendingPeople(people) {
+  return people
+    .filter((person) => !person.done)
+    .map((person) => {
+      if (person.missingCadastro) return `${person.role} ${person.teamLabel} (sem cadastro)`;
+      return `${person.role} ${person.name} (${person.teamLabel})`;
+    })
+    .join(' · ');
+}
+
 function pendingDetail(doc) {
   const done = stepCompletion(doc);
-  const teams = teamPair(doc);
-  if (!done.step1) return `Passo 1 pendente: ${doc?.partyA?.signature ? '' : 'assinatura do solicitante'}`.trim();
+  const people = stepPeopleStatus(doc);
+  if (!done.step1) {
+    const pending = formatPendingPeople(people.step1);
+    return pending ? `Passo 1 pendente: ${pending}` : 'Passo 1 pendente';
+  }
   if (!done.step2) {
-    const pendingTeams = teams.filter((team) => !doc?.approvals?.supervisors?.[team]?.signature);
-    return `Passo 2 pendente: Supervisor ${pendingTeams.map((team) => `Equipe ${team}`).join(' e ')}`;
+    const pending = formatPendingPeople(people.step2);
+    return pending ? `Passo 2 pendente: ${pending}` : 'Passo 2 pendente';
   }
   if (!done.step3) {
-    const pendingTeams = teams.filter((team) => !doc?.approvals?.chiefs?.[team]?.signature);
-    return `Passo 3 pendente: Chefe de Operações ${pendingTeams.map((team) => `Equipe ${team}`).join(' e ')}`;
+    const pending = formatPendingPeople(people.step3);
+    return pending ? `Passo 3 pendente: ${pending}` : 'Passo 3 pendente';
   }
   return 'OK · Todos os passos concluídos';
+}
+
+function appendPersonStatusList(container, people) {
+  const list = document.createElement('ul');
+  list.className = 'timeline-people';
+  people.forEach((person) => {
+    const item = document.createElement('li');
+    item.className = person.done ? 'is-done' : 'is-pending';
+    const mark = document.createElement('strong');
+    mark.textContent = person.done ? 'OK' : 'PENDENTE';
+    const copy = document.createElement('span');
+    if (person.done) {
+      copy.textContent = `${person.role}: ${person.signedBy || person.name} · ${person.teamLabel}`;
+    } else if (person.missingCadastro) {
+      copy.textContent = `${person.role}: aguardando cadastro · ${person.teamLabel}`;
+    } else {
+      copy.textContent = `${person.role}: ${person.name} · ${person.teamLabel}`;
+    }
+    item.append(mark, copy);
+    list.appendChild(item);
+  });
+  container.appendChild(list);
 }
 
 function renderTimeline(doc) {
   if (!els.docTimeline) return;
   els.docTimeline.replaceChildren();
   const done = stepCompletion(doc);
-  const teams = teamPair(doc);
-  const pendingSupervisors = teams.filter((team) => !doc?.approvals?.supervisors?.[team]?.signature);
-  const pendingChiefs = teams.filter((team) => !doc?.approvals?.chiefs?.[team]?.signature);
+  const people = stepPeopleStatus(doc);
   const data = [
-    { n: 1, done: done.step1, title: 'Partes', text: doc?.partyB?.signature && !doc?.partyA?.signature ? 'Interessado já assinou; falta o solicitante.' : 'Interessado assina a contraproposta; solicitante assina após aceitar.' },
-    { n: 2, done: done.step2, title: 'Supervisores', text: pendingSupervisors.length ? `Falta ${pendingSupervisors.map((team) => `Equipe ${team}`).join(' e ')}.` : 'Supervisor de cada equipe dá ciência e assina.' },
-    { n: 3, done: done.step3, title: 'Chefes de Operações', text: pendingChiefs.length ? `Falta ${pendingChiefs.map((team) => `Equipe ${team}`).join(' e ')}.` : 'Chefe de Operações de cada equipe dá ciência e assina.' }
+    { n: 1, done: done.step1, title: 'Partes (2 envolvidos)', people: people.step1 },
+    { n: 2, done: done.step2, title: 'Supervisores (2 equipes)', people: people.step2 },
+    { n: 3, done: done.step3, title: 'Chefes de Operações (2 equipes)', people: people.step3 }
   ];
   data.forEach((step) => {
     const item = document.createElement('article');
-    item.className = `timeline-step ${step.done ? 'is-complete' : 'is-pending'}`;
+    const isCurrent = (!done.step1 && step.n === 1)
+      || (done.step1 && !done.step2 && step.n === 2)
+      || (done.step1 && done.step2 && !done.step3 && step.n === 3);
+    item.className = `timeline-step ${step.done ? 'is-complete' : 'is-pending'}${isCurrent ? ' is-current' : ''}`;
     const icon = document.createElement('span');
     icon.className = 'timeline-check';
     icon.textContent = step.done ? '✓' : String(step.n);
@@ -1028,8 +1341,11 @@ function renderTimeline(doc) {
     const strong = document.createElement('strong');
     strong.textContent = `Passo ${step.n} · ${step.title}`;
     const small = document.createElement('small');
-    small.textContent = step.done ? 'Concluído' : step.text;
+    small.textContent = step.done
+      ? 'Concluído — os 2 envolvidos assinaram.'
+      : `Pendentes: ${formatPendingPeople(step.people) || 'aguardando'}`;
     copy.append(strong, small);
+    appendPersonStatusList(copy, step.people);
     item.append(icon, copy);
     els.docTimeline.appendChild(item);
   });
@@ -1075,7 +1391,7 @@ function renderPartyBlock(doc, partyKey) {
     } else {
       const waiting = document.createElement('p');
       waiting.className = 'troca-inbox-empty';
-      waiting.textContent = 'Assinatura pendente.';
+      waiting.textContent = `PENDENTE: ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} ${personLabel(party)} · Equipe ${party.team || '—'}.`;
       block.appendChild(waiting);
     }
   }
@@ -1119,8 +1435,8 @@ function renderApprovalGroup(doc, role) {
         const waiting = document.createElement('p');
         waiting.className = 'troca-inbox-empty';
         waiting.textContent = availability === 0
-          ? `Pendente: não há ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} ativo cadastrado na Equipe ${team}.`
-          : `Aguardando ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} da Equipe ${team}.`;
+          ? `PENDENTE: não há ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} ativo cadastrado na Equipe ${team} (${teamSideLabel(doc, team)}).`
+          : `PENDENTE: ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} da ${teamSideLabel(doc, team)}.`;
         block.appendChild(waiting);
       }
     }
@@ -1137,8 +1453,10 @@ function renderDocument(doc) {
     ['Dia solicitado', formatDateBr(doc.requestDate)],
     ['Dia da contraproposta', formatDateBr(doc.counterDate)],
     ['Equipes', `Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`],
+    ['Solicitante', personLabel(doc.partyA, '—')],
+    ['Interessado', personLabel(doc.partyB, '—')],
     ['Status', doc.status === 'completed' ? 'OK' : 'PENDENTE'],
-    ['Pendência atual', pendingDetail(doc)]
+    ['Quem está pendente', pendingDetail(doc)]
   ];
   rows.forEach(([label, value]) => {
     const item = document.createElement('div');
@@ -1178,6 +1496,12 @@ async function openDocument(documentId) {
     if (!canViewDocument(doc)) throw new Error('Você não tem acesso a este documento.');
     if (!els.docDialog.open) els.docDialog.showModal();
     renderDocument(doc);
+    if (
+      [doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey)
+      && isWithinFulfillmentWindow(doc.requestDate, doc.counterDate)
+    ) {
+      upsertPartyTracking(doc).catch((error) => console.warn('[CivilOff] tracking:', error));
+    }
     requestAnimationFrame(() => {
       els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((canvas) => bindSignaturePad(canvas));
     });
@@ -1235,6 +1559,7 @@ async function saveRequesterSignature(canvas) {
     const refreshed = (await get(docRef)).val();
     await closeMessagesForRequest(refreshed.requestId);
     await dispatchApproverMessages(refreshed, 'supervisor');
+    await upsertPartyTracking(refreshed);
     renderDocument(refreshed);
     requestAnimationFrame(() => {
       els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((item) => bindSignaturePad(item));
@@ -1337,7 +1662,7 @@ async function saveApprovalSignature(role, team, canvas) {
           documentId: openDocumentId,
           requestDate: refreshed.requestDate,
           counterDate: refreshed.counterDate,
-          noticeText: 'Passos 1, 2 e 3 concluídos. Status da troca: OK.',
+          noticeText: 'Passos 1, 2 e 3 concluídos. Status da troca: OK. O acompanhamento permanece até as datas de cumprimento.',
           status: 'pending',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
@@ -1345,7 +1670,7 @@ async function saveApprovalSignature(role, team, canvas) {
       });
       if (Object.keys(noticeWrites).length) await update(ref(database), noticeWrites);
     }
-
+    await upsertPartyTracking(refreshed);
     renderDocument(refreshed);
     requestAnimationFrame(() => {
       els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((item) => bindSignaturePad(item));
@@ -1419,6 +1744,10 @@ async function downloadDocumentPdf(doc) {
 
 async function handleClose(message) {
   if (!currentUserKey || !message?.id) return;
+  if (message.kind === 'troca-tracking' && isWithinFulfillmentWindow(message.requestDate, message.counterDate)) {
+    window.alert('Esta troca permanece disponível para as partes até as datas de cumprimento, com o status atual.');
+    return;
+  }
   try {
     await update(ref(database, `${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}`), { status: 'closed', updatedAt: serverTimestamp() });
   } catch (error) {
@@ -1464,7 +1793,7 @@ function openRequestDialog() {
 
 function openInboxDialog() {
   if (!els.inboxDialog) return;
-  renderInboxList();
+  renderInboxPanel();
   els.inboxDialog.showModal();
 }
 
