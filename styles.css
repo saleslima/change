@@ -3702,27 +3702,30 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
   .team-calendar { min-width: 0; }
   .team-calendar .th-long { display: none; }
   .team-calendar .th-short { display: inline; }
-  .team-calendar th, .team-calendar td { padding: 8px 3px; }
-  .team-calendar th { font-size: .56rem; letter-spacing: .04em; }
+  .team-calendar th { padding: 6px 3px; font-size: .56rem; letter-spacing: .04em; }
+  .team-calendar td { padding: 3px 3px; }
   .calendar-date-button {
-    max-width: 44px;
-    min-height: 32px;
-    padding: 5px 2px;
-    font-size: .8rem;
-    border-radius: 8px;
+    max-width: 38px;
+    min-height: 26px;
+    padding: 2px 2px;
+    font-size: .74rem;
+    border-radius: 7px;
   }
-  .team-letter { width: 28px; height: 28px; font-size: .78rem; }
+  .team-letter { width: 24px; height: 24px; font-size: .7rem; }
   .calendar-holiday-name,
   .calendar-troca-badge,
-  .calendar-event-marker {
+  .calendar-event-marker,
+  .calendar-scale-mark {
     max-width: 100%;
-    font-size: .48rem;
-    padding-inline: 4px;
+    margin-top: 2px;
+    font-size: .44rem;
+    padding: 1px 3px;
+    line-height: 1.1;
   }
   .team-calendar tbody tr.is-today .calendar-date-button::after {
-    top: -6px;
-    right: -4px;
-    font-size: .72rem;
+    top: -5px;
+    right: -3px;
+    font-size: .62rem;
   }
   .team-choice-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .thought-marquee span { animation-duration: 18s; }
@@ -3730,10 +3733,10 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 
 @media (max-width: 420px) {
   .team-calendar { min-width: 0; }
-  .team-calendar th { font-size: .52rem; }
-  .team-calendar th, .team-calendar td { padding: 6px 2px; }
-  .team-letter { width: 26px; height: 26px; font-size: .72rem; }
-  .calendar-date-button { max-width: 40px; min-height: 30px; font-size: .74rem; }
+  .team-calendar th { padding: 5px 2px; font-size: .5rem; }
+  .team-calendar td { padding: 2px 2px; }
+  .team-letter { width: 22px; height: 22px; font-size: .64rem; }
+  .calendar-date-button { max-width: 34px; min-height: 24px; font-size: .7rem; padding: 1px 2px; }
   .team-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .thought-marquee { max-width: calc(100vw - 52px); }
   .thought-marquee span { animation-duration: 16s; }
