@@ -14,7 +14,6 @@ import { database, firebaseConfig } from './firebase-config.js';
 const DATABASE_ROOT = 'civiloff/v1';
 const USERS_PATH = `${DATABASE_ROOT}/users`;
 const EMAIL_INDEX_PATH = `${DATABASE_ROOT}/emailIndex`;
-const SHIFTS_PATH = `${DATABASE_ROOT}/shifts`;
 const META_PATH = 'civiloff/meta';
 const SESSION_KEY = 'civilOffAccessSession:v1';
 const PBKDF2_ITERATIONS = 120000;
@@ -27,17 +26,6 @@ const INITIAL_ADMIN = Object.freeze({
   shiftId: '',
   team: ''
 });
-
-const DEFAULT_SHIFTS = Object.freeze([
-  { id: 't-01a', name: 'T-01A', schedule: '05:30 às 11:30', order: 1 },
-  { id: 't-01b', name: 'T-01B', schedule: '06:00 ao meio-dia', order: 2 },
-  { id: 't-02a', name: 'T-02A', schedule: '11:30 às 05:30', order: 3 },
-  { id: 't-02b', name: 'T-02B', schedule: 'meio-dia às 18:00', order: 4 },
-  { id: 't-03a', name: 'T-03A', schedule: '17:30 às 23:30', order: 5 },
-  { id: 't-03b', name: 'T-03B', schedule: '18:00 às 00:00', order: 6 },
-  { id: 't-04a', name: 'T-04A', schedule: '23:30 às 05:30', order: 7 },
-  { id: 't-04b', name: 'T-04B', schedule: '00:00 às 06:00', order: 8 }
-]);
 
 const RANK_LABELS = Object.freeze({
   SD_PM: 'Sd PM',
@@ -108,22 +96,17 @@ const elements = {
   userRe: document.querySelector('#userRe'),
   userEmail: document.querySelector('#userEmail'),
   userShift: document.querySelector('#userShift'),
+  userCpaBlock: document.querySelector('#userCpaBlock'),
+  userCpa: document.querySelector('#userCpa'),
   userProfile: document.querySelector('#userProfile'),
   profileRuleHint: document.querySelector('#profileRuleHint'),
   userFormStatus: document.querySelector('#userFormStatus'),
   userList: document.querySelector('#userList'),
-  userCountAdmin: document.querySelector('#userCountAdmin'),
-  shiftForm: document.querySelector('#shiftForm'),
-  shiftName: document.querySelector('#shiftName'),
-  shiftSchedule: document.querySelector('#shiftSchedule'),
-  shiftFormStatus: document.querySelector('#shiftFormStatus'),
-  shiftList: document.querySelector('#shiftList'),
-  shiftCountAdmin: document.querySelector('#shiftCountAdmin')
+  userCountAdmin: document.querySelector('#userCountAdmin')
 };
 
 let currentUser = null;
 let currentUserKey = '';
-let shiftsCache = {};
 let usersCache = {};
 let unsubscribeUsers = null;
 let usersLoaded = false;
@@ -181,6 +164,21 @@ function rankLabel(rank) {
 
 function allowedProfileForRank(rank) {
   return PROFILE_BY_RANK[rank] || '';
+}
+
+function rankAllowsCpa(rank) {
+  return ['SD_PM', 'CB_PM', '3SGT_PM', '2SGT_PM', '1SGT_PM', 'SUBTEN_PM'].includes(rank);
+}
+
+function clearCpaFields() {
+  if (elements.userCpa) elements.userCpa.value = '';
+}
+
+function refreshCpaVisibility() {
+  const allowed = rankAllowsCpa(elements.userRank?.value || '');
+  if (elements.userCpaBlock) elements.userCpaBlock.hidden = !allowed;
+  if (elements.userCpa) elements.userCpa.required = allowed;
+  if (!allowed) clearCpaFields();
 }
 
 function userIdentifier(user) {
@@ -672,6 +670,22 @@ function teamLabel(team) {
   return normalized ? `Equipe ${normalized}` : 'Sem equipe';
 }
 
+function normalizeCpa(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'ESPECIAL') return 'ESPECIAL';
+  const match = raw.match(/^M-?(\d{1,2})$/);
+  if (!match) return '';
+  const num = Number(match[1]);
+  if (num < 1 || num > 12) return '';
+  return `M-${String(num).padStart(2, '0')}`;
+}
+
+function cpaLabel(cpa) {
+  const normalized = normalizeCpa(cpa);
+  if (!normalized) return '';
+  return normalized === 'ESPECIAL' ? 'Especial' : normalized;
+}
+
 function updateSessionBar() {
   if (!currentUser) return;
   elements.currentUserName.textContent = currentUser.warName || currentUser.name;
@@ -788,24 +802,6 @@ async function seedInitialData() {
   const emailIndexSnap = await get(emailIndexRef);
   if (!emailIndexSnap.exists()) {
     await set(emailIndexRef, adminKey);
-  }
-
-  const snapshot = await get(ref(database, SHIFTS_PATH));
-  const existingShifts = snapshot.val() || {};
-  const changes = {};
-  DEFAULT_SHIFTS.forEach((shift) => {
-    if (!existingShifts[shift.id]) {
-      changes[`${SHIFTS_PATH}/${shift.id}`] = {
-        name: shift.name,
-        schedule: shift.schedule,
-        order: shift.order,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-    }
-  });
-  if (Object.keys(changes).length) {
-    await update(ref(database), changes);
   }
 
   await update(ref(database), {
@@ -996,12 +992,6 @@ async function handleForgotPassword(event) {
   }
 }
 
-function orderedShifts() {
-  return Object.entries(shiftsCache)
-    .map(([id, shift]) => ({ id, ...shift }))
-    .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999) || a.name.localeCompare(b.name, 'pt-BR'));
-}
-
 function renderShiftSelect() {
   const selected = normalizeTeam(elements.userShift.value);
   const fragment = document.createDocumentFragment();
@@ -1018,38 +1008,6 @@ function renderShiftSelect() {
   });
   elements.userShift.replaceChildren(fragment);
   if (selected) elements.userShift.value = selected;
-}
-
-function renderShiftList() {
-  const shifts = orderedShifts();
-  elements.shiftCountAdmin.textContent = String(shifts.length);
-  const fragment = document.createDocumentFragment();
-
-  shifts.forEach((shift) => {
-    const item = document.createElement('article');
-    item.className = 'admin-list-card';
-
-    const info = document.createElement('div');
-    const title = document.createElement('strong');
-    title.textContent = shift.name;
-    const detail = document.createElement('span');
-    detail.textContent = shift.schedule;
-    info.append(title, detail);
-
-    const actions = document.createElement('div');
-    actions.className = 'admin-list-actions';
-    const removeButton = document.createElement('button');
-    removeButton.type = 'button';
-    removeButton.className = 'admin-action danger';
-    removeButton.textContent = 'Excluir';
-    removeButton.addEventListener('click', () => deleteShift(shift));
-    actions.append(removeButton);
-
-    item.append(info, actions);
-    fragment.appendChild(item);
-  });
-
-  elements.shiftList.replaceChildren(fragment);
 }
 
 function renderUserList() {
@@ -1079,6 +1037,11 @@ function renderUserList() {
     const teamTag = document.createElement('small');
     teamTag.textContent = teamLabel(userTeam(user));
     tags.append(rankTag, profileTag, teamTag);
+    if (user.cpa) {
+      const cpaTag = document.createElement('small');
+      cpaTag.textContent = cpaLabel(user.cpa);
+      tags.appendChild(cpaTag);
+    }
     info.append(title, detail, tags);
 
     const actions = document.createElement('div');
@@ -1213,7 +1176,6 @@ function openAdmin() {
   subscribeUsersForAdmin();
   selectAdminTab('users');
   setStatus(elements.userFormStatus);
-  setStatus(elements.shiftFormStatus);
   const hint = document.querySelector('#firebaseProjectHint');
   if (hint) {
     hint.textContent = `Firebase: ${firebaseConfig.projectId}`;
@@ -1232,6 +1194,8 @@ async function handleCreateUser(event) {
   const reValue = normalizeRe(elements.userRe.value);
   const email = normalizeEmail(elements.userEmail.value);
   const team = normalizeTeam(elements.userShift.value);
+  const allowsCpa = rankAllowsCpa(rank);
+  const cpa = allowsCpa ? normalizeCpa(elements.userCpa?.value) : '';
   const profile = elements.userProfile.value;
   const expectedProfile = allowedProfileForRank(rank);
 
@@ -1241,6 +1205,7 @@ async function handleCreateUser(event) {
   if (!isValidRe(reValue)) { setStatus(elements.userFormStatus, 'Informe o RE no formato 000000-0. O último caractere pode ser número, A ou B.', 'error'); return; }
   if (!isValidEmail(email)) { setStatus(elements.userFormStatus, 'Informe um e-mail válido.', 'error'); return; }
   if (!team) { setStatus(elements.userFormStatus, 'Selecione uma equipe.', 'error'); return; }
+  if (allowsCpa && !cpa) { setStatus(elements.userFormStatus, 'Selecione a CPA.', 'error'); return; }
   if (!expectedProfile) {
     setStatus(elements.userFormStatus, `${rankLabel(rank)} está disponível no cadastro, mas não possui perfil operacional definido nesta regra (Despachador até Cb, Supervisor até Subten, Chefe de Operações até Cap).`, 'error');
     return;
@@ -1279,6 +1244,7 @@ async function handleCreateUser(event) {
         email,
         emailNormalized: email,
         team,
+        cpa: cpa || null,
         shiftId: null,
         profile,
         active: true,
@@ -1345,12 +1311,14 @@ function refreshProfileOptions() {
       ? 'Maj PM, Ten Cel PM e Cel PM estão disponíveis no campo de posto/graduação, mas a regra informada não atribui perfil operacional acima de Cap PM.'
       : 'Despachador: Sd PM–Cb PM · Supervisor: 3º Sgt PM–Subten PM · Chefe de Operações: 2º Ten PM–Cap PM.';
   }
+  refreshCpaVisibility();
 }
 
 function resetUserForm() {
   elements.userForm.reset();
   renderShiftSelect();
   refreshProfileOptions();
+  refreshCpaVisibility();
 }
 
 function showIssuedPassword({ target, email, password, emailed, prefix, identifier = '' }) {
@@ -1467,124 +1435,57 @@ async function deleteUser(user) {
   }
 }
 
-function createShiftId(name) {
-  const slug = name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLocaleLowerCase('pt-BR')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 30) || 'turno';
-  const random = new Uint32Array(1);
-  crypto.getRandomValues(random);
-  return `${slug}-${random[0].toString(36).slice(0, 6)}`;
-}
-
-async function handleCreateShift(event) {
-  event.preventDefault();
-  if (currentUser?.profile !== 'admin') return;
-  const name = elements.shiftName.value.trim().replace(/\s+/g, ' ').toLocaleUpperCase('pt-BR');
-  const schedule = elements.shiftSchedule.value.trim().replace(/\s+/g, ' ');
-  setStatus(elements.shiftFormStatus);
-
-  if (name.length < 2) {
-    setStatus(elements.shiftFormStatus, 'Informe o nome do turno.', 'error');
-    return;
-  }
-  if (schedule.length < 3) {
-    setStatus(elements.shiftFormStatus, 'Informe o horário do turno.', 'error');
-    return;
-  }
-  const duplicate = orderedShifts().some((shift) => shift.name.toLocaleUpperCase('pt-BR') === name);
-  if (duplicate) {
-    setStatus(elements.shiftFormStatus, 'Já existe um turno com este nome.', 'error');
-    return;
-  }
-
-  setBusy(elements.shiftForm, true);
-  try {
-    const id = createShiftId(name);
-    const maxOrder = orderedShifts().reduce((max, shift) => Math.max(max, Number(shift.order) || 0), 0);
-    await update(ref(database, `${SHIFTS_PATH}/${id}`), {
-      name,
-      schedule,
-      order: maxOrder + 1,
-      createdBy: currentUserKey,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    elements.shiftForm.reset();
-    setStatus(elements.shiftFormStatus, 'Turno cadastrado.', 'success');
-  } catch (error) {
-    console.error(error);
-    setStatus(elements.shiftFormStatus, 'Não foi possível cadastrar o turno.', 'error');
-  } finally {
-    setBusy(elements.shiftForm, false);
-  }
-}
-
-async function deleteShift(shift) {
-  if (currentUser?.profile !== 'admin') return;
-  if (!usersLoaded) {
-    setStatus(elements.shiftFormStatus, 'Aguarde o carregamento dos usuários.', 'loading');
-    return;
-  }
-  const assigned = Object.values(usersCache).some((user) => user.shiftId === shift.id);
-  if (assigned) {
-    setStatus(elements.shiftFormStatus, 'Este turno está atribuído a um ou mais usuários.', 'error');
-    return;
-  }
-  if (!window.confirm(`Excluir o turno ${shift.name}?`)) return;
-  try {
-    await update(ref(database), { [`${SHIFTS_PATH}/${shift.id}`]: null });
-    setStatus(elements.shiftFormStatus, 'Turno excluído.', 'success');
-  } catch (error) {
-    console.error(error);
-    setStatus(elements.shiftFormStatus, 'Não foi possível excluir o turno.', 'error');
-  }
-}
-
 function bindEvents() {
   bindLoginIdentifier(elements.loginCpf);
   bindReMask(elements.userRe);
   elements.userRank?.addEventListener('change', refreshProfileOptions);
   refreshProfileOptions();
-  elements.loginPassword.addEventListener('input', () => {
+  refreshCpaVisibility();
+  elements.loginPassword?.addEventListener('input', () => {
     elements.loginPassword.value = elements.loginPassword.value.replace(/\D/g, '').slice(0, 6);
   });
-  elements.loginForm.addEventListener('submit', handleLogin);
-  elements.forgotPasswordButton.addEventListener('click', openForgotPassword);
-  elements.forgotPasswordForm.addEventListener('submit', handleForgotPassword);
-  elements.cancelForgotPassword.addEventListener('click', () => elements.forgotPasswordDialog.close());
-  elements.logoutButton.addEventListener('click', showLogin);
-  elements.adminButton.addEventListener('click', openAdmin);
-  elements.closeAdminButton.addEventListener('click', () => elements.adminDialog.close());
+  elements.loginForm?.addEventListener('submit', handleLogin);
+  elements.forgotPasswordButton?.addEventListener('click', openForgotPassword);
+  elements.forgotPasswordForm?.addEventListener('submit', handleForgotPassword);
+  elements.cancelForgotPassword?.addEventListener('click', () => elements.forgotPasswordDialog.close());
+  elements.logoutButton?.addEventListener('click', showLogin);
+  elements.adminButton?.addEventListener('click', openAdmin);
+  elements.closeAdminButton?.addEventListener('click', () => elements.adminDialog.close());
   elements.adminTabs.forEach((button) => {
     button.addEventListener('click', () => selectAdminTab(button.dataset.adminTab));
   });
-  elements.userForm.addEventListener('submit', handleCreateUser);
-  elements.shiftForm.addEventListener('submit', handleCreateShift);
+  elements.userForm?.addEventListener('submit', handleCreateUser);
 }
 
 async function initialize() {
-  bindEvents();
+  if (elements.authLoading) {
+    elements.authLoading.innerHTML = '<span class="loading-ring" aria-hidden="true"></span><span>Conectando ao Firebase…</span>';
+  }
+
+  try {
+    bindEvents();
+  } catch (error) {
+    console.error(error);
+    if (elements.authLoading) {
+      elements.authLoading.dataset.type = 'error';
+      elements.authLoading.innerHTML = '<strong>Falha ao iniciar a interface.</strong><span>Recarregue a página com Ctrl+F5 para limpar o cache.</span>';
+    }
+    initializing = false;
+    return;
+  }
+
   if (!window.crypto?.subtle || !window.crypto?.getRandomValues) {
     elements.authLoading.textContent = 'Este navegador não oferece os recursos de segurança necessários. Use HTTPS (GitHub Pages) ou localhost.';
     return;
   }
 
   if (elements.authLoading) {
-    elements.authLoading.textContent = `Conectando ao Firebase (${firebaseConfig.projectId})…`;
+    elements.authLoading.innerHTML = `<span class="loading-ring" aria-hidden="true"></span><span>Conectando ao Firebase (${firebaseConfig.projectId})…</span>`;
   }
 
   try {
     await seedInitialData();
-    onValue(ref(database, SHIFTS_PATH), (snapshot) => {
-      shiftsCache = snapshot.val() || {};
-      renderShiftSelect();
-      renderShiftList();
-      updateSessionBar();
-    });
+    renderShiftSelect();
 
     const restored = await restoreSession();
     if (!restored) showLogin();

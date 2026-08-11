@@ -34,6 +34,22 @@ const nightTeamSequence = ['D', 'E', 'C', 'D', 'C'];
 const baseDate = new Date(2024, 0, 1, 12);
 const monthFormatter = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
 
+const CPA_BTL_OPTIONS = Object.freeze({
+  'M-01': ['07', '11', '13'],
+  'M-02': ['03', '12', '46', 'VDM'],
+  'M-03': ['05', '09', '18', '43'],
+  'M-04': ['02', '29', '39', '48'],
+  'M-05': ['04', '16', '23', '49'],
+  'M-06': ['06', '10', '24', '30', 'LILÁS'],
+  'M-07': ['15', '26', '31', 'BAEP'],
+  'M-08': ['14', '20', '25', '33', '36'],
+  'M-09': ['19', '28', '38'],
+  'M-10': ['01', '22', '27', '37'],
+  'M-11': ['08', '21'],
+  'M-12': ['17', '32', '35'],
+  ESPECIAL: ['CHOQUE', 'TRANS', 'RDV']
+});
+
 let currentUserKey = '';
 let currentUser = null;
 let unsubscribeInbox = null;
@@ -51,6 +67,7 @@ let usersDirectory = {};
 let openDocumentId = '';
 let openDocumentCache = null;
 let editingRequestId = '';
+let editingProposalId = '';
 let activeProposalMessage = null;
 let proposalVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
 let requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
@@ -72,6 +89,14 @@ const els = {
   requestPrevMonth: document.querySelector('#requestPrevMonth'),
   requestNextMonth: document.querySelector('#requestNextMonth'),
   teamChoices: document.querySelector('#trocaTeamChoices'),
+  roleTitular: document.querySelector('#trocaRoleTitular'),
+  roleCafe: document.querySelector('#trocaRoleCafe'),
+  btlField: document.querySelector('#trocaBtlField'),
+  btlSelect: document.querySelector('#trocaBtl'),
+  proposalRoleTitular: document.querySelector('#proposalRoleTitular'),
+  proposalRoleCafe: document.querySelector('#proposalRoleCafe'),
+  proposalBtlField: document.querySelector('#proposalBtlField'),
+  proposalBtlSelect: document.querySelector('#proposalBtl'),
   requestStatus: document.querySelector('#trocaRequestStatus'),
   cancelRequest: document.querySelector('#cancelTrocaRequest'),
   inboxDialog: document.querySelector('#trocaInboxDialog'),
@@ -135,6 +160,223 @@ function userTeam(user) {
 
 function userProfile(user) {
   return normalizeProfile(user?.profile);
+}
+
+function normalizeCpa(value) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'ESPECIAL') return 'ESPECIAL';
+  const match = raw.match(/^M-?(\d{1,2})$/);
+  if (!match) return '';
+  const num = Number(match[1]);
+  if (num < 1 || num > 12) return '';
+  return `M-${String(num).padStart(2, '0')}`;
+}
+
+function btlOptionsForCpa(cpa) {
+  return CPA_BTL_OPTIONS[normalizeCpa(cpa)] || [];
+}
+
+function normalizeBtl(value, cpa) {
+  const raw = String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!raw) return '';
+  const fold = (text) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const options = btlOptionsForCpa(cpa);
+  return options.find((item) => fold(item.toUpperCase()) === fold(raw)) || '';
+}
+
+function btlLabel(btl) {
+  const value = String(btl || '').trim();
+  if (!value) return '';
+  return /^\d+$/.test(value) ? `${value}º` : value;
+}
+
+function trocaFuncaoEls(scope = 'request') {
+  if (scope === 'proposal') {
+    return {
+      roleTitular: els.proposalRoleTitular,
+      roleCafe: els.proposalRoleCafe,
+      btlField: els.proposalBtlField,
+      btlSelect: els.proposalBtlSelect
+    };
+  }
+  return {
+    roleTitular: els.roleTitular,
+    roleCafe: els.roleCafe,
+    btlField: els.btlField,
+    btlSelect: els.btlSelect
+  };
+}
+
+function selectedTrocaRole(scope = 'request') {
+  const fields = trocaFuncaoEls(scope);
+  if (fields.roleTitular?.checked) return 'titular';
+  if (fields.roleCafe?.checked) return 'cafe';
+  return '';
+}
+
+function setTrocaRoles(roles = [], scope = 'request') {
+  const fields = trocaFuncaoEls(scope);
+  const list = Array.isArray(roles) ? roles : [];
+  const chosen = list.includes('titular') ? 'titular' : (list.includes('cafe') ? 'cafe' : '');
+  if (fields.roleTitular) fields.roleTitular.checked = chosen === 'titular';
+  if (fields.roleCafe) fields.roleCafe.checked = chosen === 'cafe';
+}
+
+function exclusiveTrocaRole(selected, scope = 'request') {
+  const fields = trocaFuncaoEls(scope);
+  if (selected === 'titular') {
+    if (fields.roleTitular?.checked && fields.roleCafe) fields.roleCafe.checked = false;
+  } else if (selected === 'cafe') {
+    if (fields.roleCafe?.checked && fields.roleTitular) fields.roleTitular.checked = false;
+  }
+  renderTrocaBtlSelect('', scope);
+}
+
+function renderTrocaBtlSelect(preferredBtl = '', scope = 'request') {
+  const fields = trocaFuncaoEls(scope);
+  if (!fields.btlSelect || !fields.btlField) return;
+  const cpa = normalizeCpa(currentUser?.cpa);
+  const titular = Boolean(fields.roleTitular?.checked);
+  const previous = preferredBtl || fields.btlSelect.value;
+  const options = titular && cpa ? btlOptionsForCpa(cpa) : [];
+
+  fields.btlField.hidden = !titular;
+  fields.btlSelect.required = titular;
+  fields.btlSelect.disabled = !titular || !cpa;
+
+  const fragment = document.createDocumentFragment();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = !titular
+    ? 'Selecione o BTL'
+    : (cpa ? 'Selecione o BTL' : 'CPA não cadastrada no seu perfil');
+  fragment.appendChild(placeholder);
+
+  options.forEach((btl) => {
+    const option = document.createElement('option');
+    option.value = btl;
+    option.textContent = btlLabel(btl);
+    fragment.appendChild(option);
+  });
+  fields.btlSelect.replaceChildren(fragment);
+
+  const match = options.find((item) => item === previous || item.toUpperCase() === String(previous || '').toUpperCase());
+  if (match) fields.btlSelect.value = match;
+}
+
+function readTrocaFuncao(scope = 'request') {
+  const fields = trocaFuncaoEls(scope);
+  const role = selectedTrocaRole(scope);
+  const roles = role ? [role] : [];
+  const cpa = normalizeCpa(currentUser?.cpa);
+  const btl = role === 'titular' ? normalizeBtl(fields.btlSelect?.value, cpa) : '';
+  if (!role) throw new Error('Selecione Titular ou Café.');
+  if (role === 'titular' && !cpa) {
+    throw new Error('Seu cadastro não tem CPA. Peça ao administrador para atualizar seu perfil.');
+  }
+  if (role === 'titular' && !btl) {
+    throw new Error('Com Titular marcado, selecione o BTL da sua CPA.');
+  }
+  return { roles, btl: btl || null, cpa: cpa || null };
+}
+
+function primaryDutyRole(roles) {
+  if (Array.isArray(roles)) {
+    if (roles.includes('titular')) return 'titular';
+    if (roles.includes('cafe')) return 'cafe';
+    return String(roles[0] || '');
+  }
+  return String(roles || '');
+}
+
+function dutyRoleLabel(roles) {
+  const role = primaryDutyRole(roles);
+  if (role === 'titular') return 'Titular';
+  if (role === 'cafe') return 'Café';
+  return '';
+}
+
+function cpaDisplay(cpa) {
+  const normalized = normalizeCpa(cpa) || String(cpa || '').trim().toUpperCase();
+  if (!normalized) return '';
+  return normalized === 'ESPECIAL' ? 'Especial' : normalized;
+}
+
+function dutyLine({ cpa, roles, btl, team } = {}, { withTeam = true } = {}) {
+  const parts = [];
+  const teamNorm = normalizeTeam(team);
+  if (withTeam && teamNorm) parts.push(`Equipe ${teamNorm}`);
+  const cpaText = cpaDisplay(cpa);
+  if (cpaText) parts.push(`CPA ${cpaText}`);
+  const roleText = dutyRoleLabel(roles);
+  if (roleText === 'Titular') {
+    parts.push('Titular');
+    if (btl) parts.push(btlLabel(btl));
+  } else if (roleText) {
+    parts.push(roleText);
+  }
+  return parts.join(' · ');
+}
+
+function requesterDutyFrom(source = {}) {
+  if (source.fromCpa || source.fromRoles || source.fromBtl || source.partyA?.cpa || source.partyA?.roles) {
+    return {
+      cpa: source.fromCpa || source.partyA?.cpa || '',
+      roles: source.fromRoles || source.partyA?.roles || [],
+      btl: source.fromBtl || source.partyA?.btl || '',
+      team: source.fromTeam || source.partyA?.team || ''
+    };
+  }
+  // Mensagens antigas de pedido: roles/btl/cpa são do solicitante.
+  if (!source.kind || source.kind === 'request') {
+    return {
+      cpa: source.cpa || '',
+      roles: source.roles || [],
+      btl: source.btl || '',
+      team: source.fromTeam || ''
+    };
+  }
+  return {
+    cpa: source.fromCpa || '',
+    roles: source.fromRoles || [],
+    btl: source.fromBtl || '',
+    team: source.fromTeam || source.partyA?.team || ''
+  };
+}
+
+function interestedDutyFrom(source = {}) {
+  if (source.interestedCpa || source.interestedRoles || source.interestedBtl || source.partyB?.cpa || source.partyB?.roles) {
+    return {
+      cpa: source.interestedCpa || source.partyB?.cpa || '',
+      roles: source.interestedRoles || source.partyB?.roles || [],
+      btl: source.interestedBtl || source.partyB?.btl || '',
+      team: source.interestedTeam || source.proposalTeam || source.partyB?.team || source.recipientTeam || ''
+    };
+  }
+  // Mensagens antigas de proposta: roles/btl/cpa são do interessado.
+  if (source.kind === 'proposal' || source.responseStatus === 'proposed') {
+    return {
+      cpa: source.cpa || '',
+      roles: source.roles || [],
+      btl: source.btl || '',
+      team: source.proposalTeam || source.recipientTeam || source.interestedTeam || ''
+    };
+  }
+  return {
+    cpa: '',
+    roles: [],
+    btl: '',
+    team: source.interestedTeam || source.proposalTeam || ''
+  };
+}
+
+function bothDutiesDetail(source = {}, { requesterLabel = 'Solicitante', interestedLabel = 'Interessado' } = {}) {
+  const requester = dutyLine(requesterDutyFrom(source));
+  const interested = dutyLine(interestedDutyFrom(source));
+  const lines = [];
+  if (requester) lines.push(`${requesterLabel}: ${requester}`);
+  if (interested) lines.push(`${interestedLabel}: ${interested}`);
+  return lines.join(' · ');
 }
 
 function userDisplayName(user) {
@@ -439,13 +681,21 @@ function renderVigentesList() {
         ? `${statusStepText(doc.status, doc)} · Você pode editar ou apagar até aceitar uma proposta.`
         : statusStepText(doc.status, doc);
       const destinos = doc.targetTeams?.length ? ` · Destino: ${targetTeamText(doc.targetTeams)}` : '';
-      detail.textContent = `${officerLine(requesterIdentity(doc))} · Dia solicitado: ${formatDateBr(doc.requestDate)} · Equipe ${doc.fromTeam || '—'}${destinos}`;
+      const duty = dutyLine(requesterDutyFrom(doc));
+      detail.textContent = [
+        `${officerLine(requesterIdentity(doc))} · Dia solicitado: ${formatDateBr(doc.requestDate)}`,
+        duty || `Equipe ${doc.fromTeam || '—'}`,
+        destinos.trim()
+      ].filter(Boolean).join(' · ');
     } else {
       const isOk = doc.status === 'completed';
       const denied = isDocDenied(doc);
       title.textContent = isOk ? 'Troca vigente · OK' : denied ? 'Troca vigente · INDEFERIDA' : 'Troca vigente · PENDENTE';
       meta.textContent = `${isOk ? 'OK · 3 passos concluídos' : publicStepStatus(doc)} · Com ${otherName}.`;
-      detail.textContent = `Cumprimento: ${formatDateBr(doc.requestDate)} ↔ ${formatDateBr(doc.counterDate || '—')} · Equipes ${doc.fromTeam || '—'} / ${doc.interestedTeam || '—'}`;
+      detail.textContent = [
+        `Cumprimento: ${formatDateBr(doc.requestDate)} ↔ ${formatDateBr(doc.counterDate || '—')}`,
+        bothDutiesDetail(doc) || `Equipes ${doc.fromTeam || '—'} / ${doc.interestedTeam || '—'}`
+      ].filter(Boolean).join(' · ');
     }
 
     card.append(title, meta, detail);
@@ -507,12 +757,16 @@ function updateAdminBadge(count) {
   if (els.adminCount) els.adminCount.textContent = String(value);
 }
 
-function addAction(actions, text, className, handler) {
+function addAction(actions, text, className, handler, { disabled = false } = {}) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `troca-action ${className || ''}`.trim();
   button.textContent = text;
-  button.addEventListener('click', handler);
+  button.disabled = Boolean(disabled);
+  if (disabled) button.setAttribute('aria-disabled', 'true');
+  if (!disabled && typeof handler === 'function') {
+    button.addEventListener('click', handler);
+  }
   actions.appendChild(button);
   return button;
 }
@@ -572,6 +826,13 @@ function buildTrackingPayload(doc, partyRole) {
     counterDate: doc.counterDate,
     fromTeam: doc.fromTeam || '',
     interestedTeam: doc.interestedTeam || '',
+    fromRoles: doc.partyA?.roles || doc.fromRoles || [],
+    fromBtl: doc.partyA?.btl || doc.fromBtl || '',
+    fromCpa: doc.partyA?.cpa || doc.fromCpa || '',
+    interestedRoles: doc.partyB?.roles || doc.interestedRoles || [],
+    interestedBtl: doc.partyB?.btl || doc.interestedBtl || '',
+    interestedCpa: doc.partyB?.cpa || doc.interestedCpa || '',
+    dutiesText: bothDutiesDetail(doc),
     partyRole,
     otherName: officerLine(pickIdentity(other || {}, other?.userKey || ''), other?.warName || other?.name || 'Contraparte'),
     docStatus: doc.status || '',
@@ -622,35 +883,59 @@ function renderInboxList() {
     if (message.kind === 'proposal') {
       title.textContent = `Contraproposta de ${officerLine(proposerIdentity(message), 'Interessado')}`;
       meta.textContent = `Você quer trocar ${formatDateBr(message.requestDate)}. A contraproposta é ${formatDateBr(message.counterDate)} e já está assinada pelo interessado.`;
-      detail.textContent = `Equipe ${message.proposalTeam || '—'} · Compare as propostas antes de aceitar uma.`;
+      detail.textContent = bothDutiesDetail(message, { requesterLabel: 'Você', interestedLabel: 'Interessado' })
+        || `Equipe ${message.proposalTeam || '—'} · Compare as propostas antes de aceitar uma.`;
+    } else if ((!message.kind || message.kind === 'request') && message.responseStatus === 'proposed') {
+      title.textContent = `${officerLine(requesterIdentity(message))} solicita troca`;
+      meta.textContent = `Sua contraproposta para ${formatDateBr(message.counterDate || message.requestDate)} já foi enviada.`;
+      detail.textContent = bothDutiesDetail(message, { requesterLabel: 'Solicitante', interestedLabel: 'Você' })
+        || `Equipe ${message.recipientTeam || userTeam(currentUser) || '—'}.`;
     } else if (message.kind === 'sign-request') {
       title.textContent = 'Passo 1 · Sua assinatura';
       meta.textContent = `A proposta de ${message.otherName || 'interessado'} foi aceita. Assine o documento para concluir o Passo 1.`;
-      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+      detail.textContent = [
+        `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
+        bothDutiesDetail(message)
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'approval-request') {
       const roleText = message.approvalRole === 'supervisor' ? 'Supervisor' : 'Chefe de Operações';
       const step = message.approvalRole === 'supervisor' ? 2 : 3;
       title.textContent = `Passo ${step} · Ciente ou indeferir · ${roleText}`;
       meta.textContent = `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Abra o documento para dar ciência e assinar ou indeferir pela Equipe ${message.approvalTeam || '—'}.`;
-      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+      detail.textContent = [
+        `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
+        bothDutiesDetail(message)
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'selected-notice') {
       title.textContent = 'Sua contraproposta foi escolhida';
       meta.textContent = 'Sua assinatura do Passo 1 já está registrada. Agora o solicitante precisa assinar.';
-      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+      detail.textContent = [
+        `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
+        bothDutiesDetail(message, { requesterLabel: 'Solicitante', interestedLabel: 'Você' })
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'troca-tracking') {
       const isOk = message.overallStatus === 'OK' || message.docStatus === 'completed';
       const denied = message.overallStatus === 'INDEFERIDO' || String(message.docStatus || '').includes('denied');
       title.textContent = isOk ? 'Troca acompanhada · OK' : denied ? 'Troca acompanhada · INDEFERIDA' : 'Troca em acompanhamento · PENDENTE';
       meta.textContent = `${message.statusText || statusStepText(message.docStatus)} · Com ${message.otherName || 'contraparte'}.`;
-      detail.textContent = `Cumprimento: ${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)} · Disponível até ${formatDateBr(message.visibleUntil || fulfillmentEndIso(message.requestDate, message.counterDate))}.`;
+      detail.textContent = [
+        `Cumprimento: ${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)} · Disponível até ${formatDateBr(message.visibleUntil || fulfillmentEndIso(message.requestDate, message.counterDate))}`,
+        message.dutiesText || bothDutiesDetail(message)
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'completed-notice') {
       title.textContent = 'Troca concluída · OK';
       meta.textContent = message.noticeText || 'Os 3 passos foram concluídos. Você já pode ver ou baixar o PDF.';
-      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+      detail.textContent = [
+        `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
+        bothDutiesDetail(message)
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'denied-notice') {
       title.textContent = `Troca indeferida · Passo ${message.deniedStep || '—'}`;
       meta.textContent = message.noticeText || 'Um responsável indeferiu esta troca neste passo.';
-      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+      detail.textContent = [
+        `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
+        bothDutiesDetail(message)
+      ].filter(Boolean).join(' · ');
     } else if (message.kind === 'proposal-rejected') {
       title.textContent = 'Proposta não escolhida';
       meta.textContent = message.noticeText || 'O solicitante não escolheu esta alternativa.';
@@ -672,7 +957,11 @@ function renderInboxList() {
     } else {
       title.textContent = `${officerLine(requesterIdentity(message))} solicita troca`;
       meta.textContent = `Dia solicitado: ${formatDateBr(message.requestDate || message.date)}.`;
-      detail.textContent = `Você recebeu este pedido como Despachador da Equipe ${message.recipientTeam || userTeam(currentUser) || '—'}. Escolha um dos dias em que sua equipe está de serviço.`;
+      const requesterDuty = dutyLine(requesterDutyFrom(message));
+      detail.textContent = [
+        `Você recebeu este pedido como Despachador da Equipe ${message.recipientTeam || userTeam(currentUser) || '—'}.`,
+        requesterDuty ? `Solicitante: ${requesterDuty}.` : ''
+      ].filter(Boolean).join(' ');
     }
 
     if (message.kind === 'troca-tracking') {
@@ -686,7 +975,12 @@ function renderInboxList() {
     const actions = document.createElement('div');
     actions.className = 'troca-message-actions';
     if (!message.kind || message.kind === 'request') {
-      addAction(actions, 'Fazer contraproposta', 'accept', () => openProposalDialog(message));
+      if (message.responseStatus === 'proposed' && message.myProposalId) {
+        addAction(actions, 'Contraproposta feita', 'done', null, { disabled: true });
+        addAction(actions, 'Refazer', 'accept', () => openProposalDialogForRedo(message));
+      } else {
+        addAction(actions, 'Fazer contraproposta', 'accept', () => openProposalDialog(message));
+      }
     } else if (message.kind === 'proposal') {
       addAction(actions, 'Aceitar proposta', 'accept', () => handleSelectProposal(message));
       addAction(actions, 'Rejeitar', 'remove', () => handleRejectProposal(message));
@@ -983,7 +1277,7 @@ async function findApprovers(profile, teams) {
     .map(([userKey, user]) => ({ userKey, name: user.name || 'Usuário', warName: user.warName || '', team: userTeam(user), rank: user.rank || '' }));
 }
 
-async function createTrocaRequest(requestDate, targetTeams) {
+async function createTrocaRequest(requestDate, targetTeams, funcao = {}) {
   if (!currentUserKey || !currentUser) throw new Error('Faça login para solicitar troca.');
   if (userProfile(currentUser) !== 'dispatcher') throw new Error('Somente o perfil Despachador solicita e participa diretamente das trocas.');
   const fromTeam = userTeam(currentUser);
@@ -998,6 +1292,10 @@ async function createTrocaRequest(requestDate, targetTeams) {
   const recipients = await findRecipients(teams, currentUserKey);
   if (!recipients.length) throw new Error('Nenhum Despachador ativo foi encontrado nas equipes selecionadas.');
 
+  const roles = Array.isArray(funcao.roles) ? funcao.roles : [];
+  const btl = funcao.btl || null;
+  const cpa = funcao.cpa || normalizeCpa(currentUser?.cpa) || null;
+
   const requestRef = push(ref(database, TROCAS_REQUESTS_PATH));
   const requestId = requestRef.key;
   const writes = {};
@@ -1008,6 +1306,12 @@ async function createTrocaRequest(requestDate, targetTeams) {
     ...requesterWriteFields(requester),
     fromTeam,
     targetTeams: teams,
+    fromRoles: roles,
+    fromBtl: btl,
+    fromCpa: cpa,
+    roles,
+    btl,
+    cpa,
     status: 'open',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
@@ -1022,6 +1326,12 @@ async function createTrocaRequest(requestDate, targetTeams) {
       ...requesterWriteFields(requester),
       fromTeam,
       recipientTeam: recipient.team,
+      fromRoles: roles,
+      fromBtl: btl,
+      fromCpa: cpa,
+      roles,
+      btl,
+      cpa,
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -1067,7 +1377,7 @@ async function validateRequesterDutyDay(requestDate) {
   return fromTeam;
 }
 
-async function updateOpenTrocaRequest(requestId, requestDate, targetTeams) {
+async function updateOpenTrocaRequest(requestId, requestDate, targetTeams, funcao = {}) {
   const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${requestId}`));
   const request = requestSnap.val();
   if (!request) throw new Error('Pedido de troca não encontrado.');
@@ -1082,6 +1392,10 @@ async function updateOpenTrocaRequest(requestId, requestDate, targetTeams) {
   const recipients = await findRecipients(teams, currentUserKey);
   if (!recipients.length) throw new Error('Nenhum Despachador ativo foi encontrado nas equipes selecionadas.');
 
+  const roles = Array.isArray(funcao.roles) ? funcao.roles : [];
+  const btl = funcao.btl || null;
+  const cpa = funcao.cpa || normalizeCpa(currentUser?.cpa) || null;
+
   const proposalsSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${requestId}`));
   const proposals = proposalsSnap.val() || {};
   const dateChanged = request.requestDate !== requestDate;
@@ -1091,6 +1405,12 @@ async function updateOpenTrocaRequest(requestId, requestDate, targetTeams) {
 
   writes[`${TROCAS_REQUESTS_PATH}/${requestId}/requestDate`] = requestDate;
   writes[`${TROCAS_REQUESTS_PATH}/${requestId}/targetTeams`] = teams;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/fromRoles`] = roles;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/fromBtl`] = btl;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/fromCpa`] = cpa;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/roles`] = roles;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/btl`] = btl;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/cpa`] = cpa;
   writes[`${TROCAS_REQUESTS_PATH}/${requestId}/updatedAt`] = serverTimestamp();
 
   const inboxEntries = await listInboxEntries();
@@ -1126,6 +1446,12 @@ async function updateOpenTrocaRequest(requestId, requestDate, targetTeams) {
       ...requesterWriteFields(requester),
       fromTeam,
       recipientTeam: recipient.team,
+      fromRoles: roles,
+      fromBtl: btl,
+      fromCpa: cpa,
+      roles,
+      btl,
+      cpa,
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -1426,23 +1752,93 @@ function openProposalDialog(message) {
     return;
   }
   activeProposalMessage = message;
+  editingProposalId = '';
   const base = fromLocalISO(message.requestDate) || new Date();
   proposalVisibleMonth = new Date(base.getFullYear(), base.getMonth(), 1, 12);
   if (proposalVisibleMonth < new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12)) {
     proposalVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
   }
   if (els.proposalDate) els.proposalDate.value = '';
-  if (els.proposalSelectedDate) els.proposalSelectedDate.textContent = `Selecione um dia em que a Equipe ${userTeam(currentUser) || '—'} esteja de serviço.`;
-  if (els.proposalIntro) {
-    els.proposalIntro.textContent = `${officerLine(requesterIdentity(message), 'O solicitante')} quer trocar ${formatDateBr(message.requestDate)}. Só os dias de serviço da Equipe ${userTeam(currentUser) || '—'} estão habilitados.`;
+  if (els.proposalSelectedDate) {
+    els.proposalSelectedDate.textContent = `Selecione um dia em que a Equipe ${userTeam(currentUser) || '—'} esteja de serviço.`;
   }
+  if (els.proposalIntro) {
+    const requesterDuty = dutyLine(requesterDutyFrom(message));
+    els.proposalIntro.textContent = [
+      `${officerLine(requesterIdentity(message), 'O solicitante')} quer trocar ${formatDateBr(message.requestDate)}.`,
+      requesterDuty ? `Lotação: ${requesterDuty}.` : '',
+      `Só os dias de serviço da Equipe ${userTeam(currentUser) || '—'} estão habilitados.`
+    ].filter(Boolean).join(' ');
+  }
+  const submitBtn = els.proposalForm?.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.textContent = 'Assinar e enviar proposta';
+  setTrocaRoles([], 'proposal');
+  renderTrocaBtlSelect('', 'proposal');
+  clearSignatureCanvas(els.proposalSignature);
   setStatus(els.proposalStatus);
   renderProposalCalendar();
   els.proposalDialog.showModal();
   requestAnimationFrame(() => bindSignaturePad(els.proposalSignature));
 }
 
-async function createProposal(message, counterDate, signature) {
+async function openProposalDialogForRedo(message) {
+  if (!message?.requestId || !message?.myProposalId) return;
+  try {
+    const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${message.requestId}`));
+    const request = requestSnap.val();
+    if (!request || request.status !== 'open') {
+      window.alert('O solicitante já aceitou outra proposta ou o pedido foi encerrado. Não é mais possível refazer.');
+      return;
+    }
+    const proposalSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${message.requestId}/${message.myProposalId}`));
+    const proposal = proposalSnap.val();
+    if (!proposal) {
+      window.alert('Sua contraproposta anterior não foi encontrada. Envie uma nova.');
+      openProposalDialog(message);
+      return;
+    }
+    if (proposal.status && !['pending', 'rejected'].includes(proposal.status)) {
+      window.alert('Esta contraproposta não pode mais ser alterada.');
+      return;
+    }
+
+    activeProposalMessage = message;
+    editingProposalId = message.myProposalId;
+    const counterDate = proposal.counterDate || message.counterDate || '';
+    const selected = fromLocalISO(counterDate);
+    proposalVisibleMonth = selected
+      ? new Date(selected.getFullYear(), selected.getMonth(), 1, 12)
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+    if (els.proposalDate) els.proposalDate.value = counterDate;
+    if (els.proposalSelectedDate) {
+      els.proposalSelectedDate.textContent = counterDate
+        ? `Selecionado: ${formatDateBr(counterDate)} · Equipe ${userTeam(currentUser) || '—'} em serviço.`
+        : `Selecione um dia em que a Equipe ${userTeam(currentUser) || '—'} esteja de serviço.`;
+    }
+    if (els.proposalIntro) {
+      const requesterDuty = dutyLine(requesterDutyFrom(message));
+      els.proposalIntro.textContent = [
+        `Refaça sua contraproposta para ${officerLine(requesterIdentity(message), 'o solicitante')}.`,
+        requesterDuty ? `Lotação do solicitante: ${requesterDuty}.` : '',
+        'Enquanto ele não aceitar, você pode alterar dia, função e assinatura.'
+      ].filter(Boolean).join(' ');
+    }
+    const submitBtn = els.proposalForm?.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.textContent = 'Assinar e refazer proposta';
+    setTrocaRoles(proposal.interestedRoles || proposal.roles || message.interestedRoles || message.roles || [], 'proposal');
+    renderTrocaBtlSelect(proposal.interestedBtl || proposal.btl || message.interestedBtl || message.btl || '', 'proposal');
+    clearSignatureCanvas(els.proposalSignature);
+    setStatus(els.proposalStatus);
+    renderProposalCalendar();
+    els.proposalDialog.showModal();
+    requestAnimationFrame(() => bindSignaturePad(els.proposalSignature));
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || 'Não foi possível abrir a contraproposta para refazer.');
+  }
+}
+
+async function createProposal(message, counterDate, signature, funcao = {}) {
   if (!currentUserKey || !currentUser || !message?.requestId) throw new Error('Dados da solicitação incompletos.');
   const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${message.requestId}`));
   const request = requestSnap.val();
@@ -1453,6 +1849,13 @@ async function createProposal(message, counterDate, signature) {
   const counterDateObject = fromLocalISO(counterDate);
   if (!counterDateObject || !isTeamOnDuty(counterDateObject, team)) throw new Error(`Escolha um dia em que a Equipe ${team} esteja de serviço.`);
   if (counterDate < todayIso() || counterDate === request.requestDate) throw new Error('Escolha outro dia de serviço válido e não passado.');
+
+  const roles = Array.isArray(funcao.roles) ? funcao.roles : [];
+  const btl = funcao.btl || null;
+  const cpa = funcao.cpa || normalizeCpa(currentUser?.cpa) || null;
+  const fromRoles = request.fromRoles || request.roles || message.fromRoles || message.roles || [];
+  const fromBtl = request.fromBtl || request.btl || message.fromBtl || message.btl || null;
+  const fromCpa = request.fromCpa || request.cpa || message.fromCpa || message.cpa || null;
 
   const proposalId = push(ref(database, `${TROCAS_PROPOSALS_PATH}/${message.requestId}`)).key;
   const requesterMessageId = push(ref(database, `${TROCAS_INBOX_PATH}/${request.fromUserKey}`)).key;
@@ -1467,6 +1870,15 @@ async function createProposal(message, counterDate, signature) {
     proposalBy: currentUserKey,
     ...proposerFields,
     proposalTeam: team,
+    fromRoles,
+    fromBtl,
+    fromCpa,
+    interestedRoles: roles,
+    interestedBtl: btl,
+    interestedCpa: cpa,
+    roles,
+    btl,
+    cpa,
     interestedSignature: signature,
     interestedSignedAt: now,
     status: 'pending',
@@ -1484,18 +1896,181 @@ async function createProposal(message, counterDate, signature) {
     proposalBy: currentUserKey,
     ...proposerFields,
     proposalTeam: team,
+    fromTeam: request.fromTeam || '',
+    fromRoles,
+    fromBtl,
+    fromCpa,
+    interestedRoles: roles,
+    interestedBtl: btl,
+    interestedCpa: cpa,
+    roles,
+    btl,
+    cpa,
     status: 'pending',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   };
+  if (message.id) {
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/responseStatus`] = 'proposed';
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/myProposalId`] = proposalId;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/counterDate`] = counterDate;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromRoles`] = fromRoles;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromBtl`] = fromBtl;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromCpa`] = fromCpa;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedRoles`] = roles;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedBtl`] = btl;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedCpa`] = cpa;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/proposalTeam`] = team;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/updatedAt`] = serverTimestamp();
+  }
   await update(ref(database), writes);
   return proposal;
+}
+
+async function updateOwnProposal(message, counterDate, signature, funcao = {}) {
+  if (!currentUserKey || !currentUser || !message?.requestId) throw new Error('Dados da solicitação incompletos.');
+  const proposalId = editingProposalId || message.myProposalId;
+  if (!proposalId) throw new Error('Contraproposta anterior não encontrada.');
+
+  const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${message.requestId}`));
+  const request = requestSnap.val();
+  if (!request || request.status !== 'open') {
+    throw new Error('O solicitante já aceitou uma proposta ou o pedido foi encerrado.');
+  }
+
+  const proposalPath = `${TROCAS_PROPOSALS_PATH}/${message.requestId}/${proposalId}`;
+  const proposalSnap = await get(ref(database, proposalPath));
+  const existing = proposalSnap.val();
+  if (!existing) throw new Error('Sua contraproposta não foi encontrada.');
+  if (existing.proposalBy !== currentUserKey) throw new Error('Somente quem enviou a contraproposta pode refazê-la.');
+  if (existing.status && !['pending', 'rejected'].includes(existing.status)) {
+    throw new Error('Esta contraproposta não pode mais ser alterada.');
+  }
+
+  const team = userTeam(currentUser);
+  if (!team || !(request.targetTeams || []).includes(team)) throw new Error('Sua equipe não está entre as equipes escolhidas para esta troca.');
+  const counterDateObject = fromLocalISO(counterDate);
+  if (!counterDateObject || !isTeamOnDuty(counterDateObject, team)) throw new Error(`Escolha um dia em que a Equipe ${team} esteja de serviço.`);
+  if (counterDate < todayIso() || counterDate === request.requestDate) throw new Error('Escolha outro dia de serviço válido e não passado.');
+
+  const roles = Array.isArray(funcao.roles) ? funcao.roles : [];
+  const btl = funcao.btl || null;
+  const cpa = funcao.cpa || normalizeCpa(currentUser?.cpa) || null;
+  const fromRoles = request.fromRoles || request.roles || message.fromRoles || [];
+  const fromBtl = request.fromBtl || request.btl || message.fromBtl || null;
+  const fromCpa = request.fromCpa || request.cpa || message.fromCpa || null;
+  const now = Date.now();
+  const proposer = currentUserIdentity();
+  const proposerFields = proposerWriteFields(proposer);
+  const writes = {};
+
+  writes[`${proposalPath}/requestDate`] = request.requestDate;
+  writes[`${proposalPath}/counterDate`] = counterDate;
+  writes[`${proposalPath}/proposalTeam`] = team;
+  writes[`${proposalPath}/fromRoles`] = fromRoles;
+  writes[`${proposalPath}/fromBtl`] = fromBtl;
+  writes[`${proposalPath}/fromCpa`] = fromCpa;
+  writes[`${proposalPath}/interestedRoles`] = roles;
+  writes[`${proposalPath}/interestedBtl`] = btl;
+  writes[`${proposalPath}/interestedCpa`] = cpa;
+  writes[`${proposalPath}/roles`] = roles;
+  writes[`${proposalPath}/btl`] = btl;
+  writes[`${proposalPath}/cpa`] = cpa;
+  writes[`${proposalPath}/interestedSignature`] = signature;
+  writes[`${proposalPath}/interestedSignedAt`] = now;
+  writes[`${proposalPath}/status`] = 'pending';
+  writes[`${proposalPath}/updatedAt`] = serverTimestamp();
+  Object.entries(proposerFields).forEach(([field, value]) => {
+    writes[`${proposalPath}/${field}`] = value;
+  });
+
+  const inboxEntries = await listInboxEntries();
+  let requesterProposalMessageFound = false;
+  inboxEntries.forEach(({ userKey, messageId, message: inboxMessage }) => {
+    if (
+      userKey === request.fromUserKey
+      && inboxMessage?.requestId === message.requestId
+      && inboxMessage?.kind === 'proposal'
+      && inboxMessage?.proposalId === proposalId
+    ) {
+      requesterProposalMessageFound = true;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/requestDate`] = request.requestDate;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/counterDate`] = counterDate;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/proposalTeam`] = team;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/fromTeam`] = request.fromTeam || '';
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/fromRoles`] = fromRoles;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/fromBtl`] = fromBtl;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/fromCpa`] = fromCpa;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/interestedRoles`] = roles;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/interestedBtl`] = btl;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/interestedCpa`] = cpa;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/roles`] = roles;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/btl`] = btl;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/cpa`] = cpa;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/status`] = 'pending';
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/updatedAt`] = serverTimestamp();
+      Object.entries(proposerFields).forEach(([field, value]) => {
+        writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/${field}`] = value;
+      });
+    }
+  });
+
+  if (!requesterProposalMessageFound) {
+    const requesterMessageId = push(ref(database, `${TROCAS_INBOX_PATH}/${request.fromUserKey}`)).key;
+    writes[`${TROCAS_INBOX_PATH}/${request.fromUserKey}/${requesterMessageId}`] = {
+      kind: 'proposal',
+      requestId: message.requestId,
+      proposalId,
+      requestDate: request.requestDate,
+      counterDate,
+      proposalBy: currentUserKey,
+      ...proposerFields,
+      proposalTeam: team,
+      fromTeam: request.fromTeam || '',
+      fromRoles,
+      fromBtl,
+      fromCpa,
+      interestedRoles: roles,
+      interestedBtl: btl,
+      interestedCpa: cpa,
+      roles,
+      btl,
+      cpa,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+  }
+
+  if (message.id) {
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/responseStatus`] = 'proposed';
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/myProposalId`] = proposalId;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/counterDate`] = counterDate;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromRoles`] = fromRoles;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromBtl`] = fromBtl;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/fromCpa`] = fromCpa;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedRoles`] = roles;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedBtl`] = btl;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/interestedCpa`] = cpa;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/proposalTeam`] = team;
+    writes[`${TROCAS_INBOX_PATH}/${currentUserKey}/${message.id}/updatedAt`] = serverTimestamp();
+  }
+
+  await update(ref(database), writes);
+  return { proposalId, counterDate, roles, btl, cpa };
 }
 
 async function handleProposalSubmit(event) {
   event.preventDefault();
   if (!activeProposalMessage) return;
   const counterDate = els.proposalDate?.value || '';
+  let funcao;
+  try {
+    funcao = readTrocaFuncao('proposal');
+  } catch (error) {
+    setStatus(els.proposalStatus, error.message || 'Informe a função da contraproposta.', 'error');
+    return;
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(counterDate)) {
     setStatus(els.proposalStatus, 'Escolha no calendário um dia em que sua equipe esteja de serviço.', 'error');
     return;
@@ -1509,14 +2084,20 @@ async function handleProposalSubmit(event) {
     setStatus(els.proposalStatus, 'Assine a contraproposta antes de enviar.', 'error');
     return;
   }
-  setStatus(els.proposalStatus, 'Registrando contraproposta e assinatura…', 'loading');
+  setStatus(els.proposalStatus, editingProposalId ? 'Atualizando contraproposta…' : 'Registrando contraproposta e assinatura…', 'loading');
   try {
     const signature = exportSignature(els.proposalSignature);
-    await createProposal(activeProposalMessage, counterDate, signature);
-    setStatus(els.proposalStatus, 'Contraproposta enviada. Sua assinatura do Passo 1 já foi registrada.', 'success');
+    if (editingProposalId || activeProposalMessage.myProposalId) {
+      await updateOwnProposal(activeProposalMessage, counterDate, signature, funcao);
+      setStatus(els.proposalStatus, 'Contraproposta refeita e assinatura atualizada.', 'success');
+    } else {
+      await createProposal(activeProposalMessage, counterDate, signature, funcao);
+      setStatus(els.proposalStatus, 'Contraproposta enviada. Sua assinatura do Passo 1 já foi registrada.', 'success');
+    }
     window.setTimeout(() => {
       els.proposalDialog?.close();
       activeProposalMessage = null;
+      editingProposalId = '';
       setStatus(els.proposalStatus);
     }, 1300);
   } catch (error) {
@@ -1726,6 +2307,9 @@ async function handleSelectProposal(message) {
         re: requesterId.re || request.fromRe || '',
         reMasked: requesterId.reMasked || request.fromReMasked || '',
         team: request.fromTeam || '',
+        cpa: request.fromCpa || request.cpa || selectedFresh.fromCpa || '',
+        roles: request.fromRoles || request.roles || selectedFresh.fromRoles || [],
+        btl: request.fromBtl || request.btl || selectedFresh.fromBtl || '',
         role: 'requester',
         signature: null,
         signedAt: null
@@ -1738,6 +2322,9 @@ async function handleSelectProposal(message) {
         re: selectedId.re || selectedFresh.proposalByRe || '',
         reMasked: selectedId.reMasked || selectedFresh.proposalByReMasked || '',
         team: selectedFresh.proposalTeam || '',
+        cpa: selectedFresh.interestedCpa || selectedFresh.cpa || '',
+        roles: selectedFresh.interestedRoles || selectedFresh.roles || [],
+        btl: selectedFresh.interestedBtl || selectedFresh.btl || '',
         role: 'interested',
         signature: selectedFresh.interestedSignature,
         signedAt: selectedFresh.interestedSignedAt || now
@@ -1767,6 +2354,14 @@ async function handleSelectProposal(message) {
       documentId,
       requestDate: request.requestDate,
       counterDate: selectedFresh.counterDate,
+      fromTeam: request.fromTeam || '',
+      interestedTeam: selectedFresh.proposalTeam || '',
+      fromRoles: request.fromRoles || request.roles || selectedFresh.fromRoles || [],
+      fromBtl: request.fromBtl || request.btl || selectedFresh.fromBtl || '',
+      fromCpa: request.fromCpa || request.cpa || selectedFresh.fromCpa || '',
+      interestedRoles: selectedFresh.interestedRoles || selectedFresh.roles || [],
+      interestedBtl: selectedFresh.interestedBtl || selectedFresh.btl || '',
+      interestedCpa: selectedFresh.interestedCpa || selectedFresh.cpa || '',
       otherName: officerLine(proposerIdentity(selectedFresh), selectedFresh.proposalByWarName || selectedFresh.proposalByName || 'Interessado'),
       status: 'pending',
       createdAt: serverTimestamp(),
@@ -1778,6 +2373,14 @@ async function handleSelectProposal(message) {
       documentId,
       requestDate: request.requestDate,
       counterDate: selectedFresh.counterDate,
+      fromTeam: request.fromTeam || '',
+      interestedTeam: selectedFresh.proposalTeam || '',
+      fromRoles: request.fromRoles || request.roles || selectedFresh.fromRoles || [],
+      fromBtl: request.fromBtl || request.btl || selectedFresh.fromBtl || '',
+      fromCpa: request.fromCpa || request.cpa || selectedFresh.fromCpa || '',
+      interestedRoles: selectedFresh.interestedRoles || selectedFresh.roles || [],
+      interestedBtl: selectedFresh.interestedBtl || selectedFresh.btl || '',
+      interestedCpa: selectedFresh.interestedCpa || selectedFresh.cpa || '',
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -2004,7 +2607,12 @@ function renderPartyBlock(doc, partyKey) {
   heading.textContent = `Passo 1 · ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} — ${officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name)}`;
   const role = document.createElement('p');
   role.className = 'troca-message-from';
-  role.textContent = `${party.name || ''} · Equipe ${party.team || '—'}`;
+  role.textContent = dutyLine({
+    cpa: party.cpa,
+    roles: party.roles,
+    btl: party.btl,
+    team: party.team
+  }) || `${party.name || ''} · Equipe ${party.team || '—'}`;
   block.append(heading, role);
   if (!appendSignedImage(block, party)) {
     const allowed = partyKey === 'partyA' && party.userKey === currentUserKey && doc.status === 'step1-requester';
@@ -2102,7 +2710,9 @@ function renderDocument(doc) {
     ['Dia da contraproposta', formatDateBr(doc.counterDate)],
     ['Equipes', `Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`],
     ['Solicitante', personLabel(doc.partyA, '—')],
+    ['Lotação do solicitante', dutyLine(requesterDutyFrom(doc)) || '—'],
     ['Interessado', personLabel(doc.partyB, '—')],
+    ['Lotação do interessado', dutyLine(interestedDutyFrom(doc)) || '—'],
     ['Status', doc.status === 'completed' ? 'OK' : isDocDenied(doc) ? 'INDEFERIDO' : 'PENDENTE'],
     [full ? 'Quem está pendente' : 'Andamento', viewerStepStatus(doc)]
   ];
@@ -2501,8 +3111,8 @@ async function buildDocumentPdf(doc) {
     `Status: ${doc.status === 'completed' ? 'OK — 3 passos concluídos' : isDocDenied(doc) ? `INDEFERIDO — ${publicStepStatus(doc)}` : pendingDetail(doc)}`,
     `Dia solicitado: ${formatDateBr(doc.requestDate)}`,
     `Dia da contraproposta: ${formatDateBr(doc.counterDate)}`,
-    `Solicitante: ${officerLine(requesterIdentity(doc), doc.partyA?.name || '—')} — Equipe ${doc.fromTeam || '—'}`,
-    `Interessado: ${officerLine(proposerIdentity(doc), doc.partyB?.name || '—')} — Equipe ${doc.interestedTeam || '—'}`
+    `Solicitante: ${officerLine(requesterIdentity(doc), doc.partyA?.name || '—')} — ${dutyLine(requesterDutyFrom(doc)) || `Equipe ${doc.fromTeam || '—'}`}`,
+    `Interessado: ${officerLine(proposerIdentity(doc), doc.partyB?.name || '—')} — ${dutyLine(interestedDutyFrom(doc)) || `Equipe ${doc.interestedTeam || '—'}`}`
   ];
   lines.forEach((line) => { pdf.text(line, margin, y); y += 6; });
   y += 4;
@@ -2601,7 +3211,7 @@ function resetRequestDialogMode() {
   if (els.requestSubmit) els.requestSubmit.textContent = 'Enviar pedido';
 }
 
-function prepareRequestDialog({ requestId = '', requestDate = '', targetTeams = [] } = {}) {
+function prepareRequestDialog({ requestId = '', requestDate = '', targetTeams = [], roles = [], btl = '' } = {}) {
   const mine = userTeam(currentUser);
   if (userProfile(currentUser) !== 'dispatcher') {
     window.alert('Somente Despachadores podem solicitar troca. Supervisores e Chefes de Operações atuam nas etapas de ciência.');
@@ -2631,12 +3241,14 @@ function prepareRequestDialog({ requestId = '', requestDate = '', targetTeams = 
   if (editingRequestId) {
     if (els.requestTitle) els.requestTitle.textContent = 'Editar pedido de troca';
     if (els.requestIntro) {
-      els.requestIntro.textContent = 'Altere o dia ou as equipes de destino. Isso só é possível enquanto você não aceitar nenhuma contraproposta.';
+      els.requestIntro.textContent = 'Altere o dia, a função ou as equipes de destino. Isso só é possível enquanto você não aceitar nenhuma contraproposta.';
     }
     if (els.requestSubmit) els.requestSubmit.textContent = 'Salvar alterações';
   } else {
     resetRequestDialogMode();
   }
+  setTrocaRoles(roles);
+  renderTrocaBtlSelect(btl || '');
   refreshTeamChoices(targetTeams);
   renderRequestCalendar();
   return true;
@@ -2657,7 +3269,9 @@ function openRequestDialogForEdit(request) {
   if (!prepareRequestDialog({
     requestId: request.id || request.requestId,
     requestDate: request.requestDate || '',
-    targetTeams: request.targetTeams || []
+    targetTeams: request.targetTeams || [],
+    roles: request.roles || [],
+    btl: request.btl || ''
   })) return;
   els.requestDialog.showModal();
 }
@@ -2681,6 +3295,13 @@ async function handleRequestSubmit(event) {
   setStatus(els.requestStatus);
   const requestDate = els.requestDate?.value || '';
   const teams = selectedTargetTeams();
+  let funcao;
+  try {
+    funcao = readTrocaFuncao();
+  } catch (error) {
+    setStatus(els.requestStatus, error.message || 'Informe a função da troca.', 'error');
+    return;
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(requestDate)) {
     setStatus(els.requestStatus, 'Escolha um dia de serviço da sua equipe no calendário.', 'error');
     return;
@@ -2697,8 +3318,8 @@ async function handleRequestSubmit(event) {
   setStatus(els.requestStatus, editingRequestId ? 'Salvando alterações…' : 'Enviando solicitação…', 'loading');
   try {
     const result = editingRequestId
-      ? await updateOpenTrocaRequest(editingRequestId, requestDate, teams)
-      : await createTrocaRequest(requestDate, teams);
+      ? await updateOpenTrocaRequest(editingRequestId, requestDate, teams, funcao)
+      : await createTrocaRequest(requestDate, teams, funcao);
     const prefix = editingRequestId ? 'Pedido atualizado' : 'Pedido enviado';
     setStatus(els.requestStatus, `${prefix} para ${result.recipientCount} Despachador(es) de ${targetTeamText(result.teams)}.`, 'success');
     window.setTimeout(() => {
@@ -2717,8 +3338,14 @@ function bindEvents() {
   els.cancelRequest?.addEventListener('click', () => els.requestDialog?.close());
   els.requestDialog?.addEventListener('close', () => {
     resetRequestDialogMode();
+    setTrocaRoles([], 'request');
+    renderTrocaBtlSelect('', 'request');
     setStatus(els.requestStatus);
   });
+  els.roleTitular?.addEventListener('change', () => exclusiveTrocaRole('titular', 'request'));
+  els.roleCafe?.addEventListener('change', () => exclusiveTrocaRole('cafe', 'request'));
+  els.proposalRoleTitular?.addEventListener('change', () => exclusiveTrocaRole('titular', 'proposal'));
+  els.proposalRoleCafe?.addEventListener('change', () => exclusiveTrocaRole('cafe', 'proposal'));
   els.closeInbox?.addEventListener('click', () => els.inboxDialog?.close());
   els.closeDoc?.addEventListener('click', () => els.docDialog?.close());
   els.viewPdf?.addEventListener('click', () => handleViewPdf(openDocumentId || openDocumentCache?.requestId || openDocumentCache?.id));
@@ -2726,6 +3353,13 @@ function bindEvents() {
   els.cancelProposal?.addEventListener('click', () => {
     activeProposalMessage = null;
     els.proposalDialog?.close();
+  });
+  els.proposalDialog?.addEventListener('close', () => {
+    activeProposalMessage = null;
+    editingProposalId = '';
+    setTrocaRoles([], 'proposal');
+    renderTrocaBtlSelect('', 'proposal');
+    setStatus(els.proposalStatus);
   });
   els.requestForm?.addEventListener('submit', handleRequestSubmit);
   els.proposalForm?.addEventListener('submit', handleProposalSubmit);

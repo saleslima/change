@@ -33,7 +33,7 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="styles.css?v=914">
+  <link rel="stylesheet" href="styles.css?v=918">
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -272,6 +272,27 @@
         <p class="proposal-calendar-help">Somente os dias em que sua equipe está de serviço ficam disponíveis. Os demais permanecem foscos.</p>
       </section>
 
+      <fieldset class="admin-check-group troca-funcao-group">
+        <legend>FUNÇÃO</legend>
+        <div class="admin-check-row">
+          <label class="admin-check">
+            <input id="trocaRoleTitular" type="checkbox" value="titular">
+            <span>Titular</span>
+          </label>
+          <label class="admin-check">
+            <input id="trocaRoleCafe" type="checkbox" value="cafe">
+            <span>Café</span>
+          </label>
+        </div>
+      </fieldset>
+      <label id="trocaBtlField" class="admin-field admin-btl-field" for="trocaBtl" hidden>
+        <span>BTL</span>
+        <select id="trocaBtl">
+          <option value="">Selecione o BTL</option>
+        </select>
+        <small class="field-hint">Opções da sua CPA de cadastro.</small>
+      </label>
+
       <fieldset class="team-choice-fieldset">
         <legend>EQUIPES DE DESTINO</legend>
         <div id="trocaTeamChoices" class="team-choice-grid">
@@ -346,6 +367,27 @@
         <p class="proposal-calendar-help">Dias em que sua equipe não está de serviço ficam foscos e não podem ser selecionados.</p>
       </section>
 
+      <fieldset class="admin-check-group troca-funcao-group">
+        <legend>FUNÇÃO</legend>
+        <div class="admin-check-row">
+          <label class="admin-check">
+            <input id="proposalRoleTitular" type="checkbox" value="titular">
+            <span>Titular</span>
+          </label>
+          <label class="admin-check">
+            <input id="proposalRoleCafe" type="checkbox" value="cafe">
+            <span>Café</span>
+          </label>
+        </div>
+      </fieldset>
+      <label id="proposalBtlField" class="admin-field admin-btl-field" for="proposalBtl" hidden>
+        <span>BTL</span>
+        <select id="proposalBtl">
+          <option value="">Selecione o BTL</option>
+        </select>
+        <small class="field-hint">Opções da sua CPA de cadastro.</small>
+      </label>
+
       <section class="proposal-signature-section">
         <div class="proposal-signature-heading">
           <span>PASSO 1 · ASSINATURA DO INTERESSADO</span>
@@ -400,7 +442,6 @@
 
       <nav class="admin-tabs" role="tablist" aria-label="Seções administrativas">
         <button class="admin-tab active" type="button" role="tab" aria-selected="true" data-admin-tab="users">Usuários</button>
-        <button class="admin-tab" type="button" role="tab" aria-selected="false" data-admin-tab="shifts">Horários</button>
         <button class="admin-tab" type="button" role="tab" aria-selected="false" data-admin-tab="trocas">
           Trocas
           <strong id="adminTrocasBadge" class="admin-tab-badge" hidden>0</strong>
@@ -466,6 +507,27 @@
                   <option value="E">Equipe E</option>
                 </select>
               </label>
+              <div id="userCpaBlock" class="admin-cpa-block" hidden>
+                <label class="admin-field" for="userCpa">
+                  <span>CPA</span>
+                  <select id="userCpa">
+                    <option value="">Selecione a CPA</option>
+                    <option value="M-01">M-01</option>
+                    <option value="M-02">M-02</option>
+                    <option value="M-03">M-03</option>
+                    <option value="M-04">M-04</option>
+                    <option value="M-05">M-05</option>
+                    <option value="M-06">M-06</option>
+                    <option value="M-07">M-07</option>
+                    <option value="M-08">M-08</option>
+                    <option value="M-09">M-09</option>
+                    <option value="M-10">M-10</option>
+                    <option value="M-11">M-11</option>
+                    <option value="M-12">M-12</option>
+                    <option value="ESPECIAL">Especial</option>
+                  </select>
+                </label>
+              </div>
               <label class="admin-field" for="userProfile">
                 <span>PERFIL</span>
                 <select id="userProfile" required>
@@ -486,38 +548,6 @@
                 <span id="userCountAdmin" class="admin-count">0</span>
               </div>
               <div id="userList" class="admin-list" aria-live="polite"></div>
-            </div>
-          </div>
-        </section>
-
-        <section data-admin-panel="shifts" hidden>
-          <div class="admin-grid">
-            <form id="shiftForm" class="admin-form" novalidate>
-              <div class="admin-form-heading">
-                <h3>Cadastrar turno</h3>
-                <p>Informe um nome e a descrição do horário.</p>
-              </div>
-              <label class="admin-field" for="shiftName">
-                <span>NOME DO TURNO</span>
-                <input id="shiftName" type="text" maxlength="30" placeholder="Ex.: T-05A" required>
-              </label>
-              <label class="admin-field" for="shiftSchedule">
-                <span>HORÁRIO</span>
-                <input id="shiftSchedule" type="text" maxlength="60" placeholder="Ex.: 06:00 às 12:00" required>
-              </label>
-              <p id="shiftFormStatus" class="form-status" role="status" aria-live="polite" hidden></p>
-              <button class="admin-primary" type="submit">Cadastrar turno</button>
-            </form>
-
-            <div class="admin-list-panel">
-              <div class="admin-list-heading">
-                <div>
-                  <p class="section-label">LISTA DE TURNOS</p>
-                  <h3>Disponíveis</h3>
-                </div>
-                <span id="shiftCountAdmin" class="admin-count">0</span>
-              </div>
-              <div id="shiftList" class="admin-list" aria-live="polite"></div>
             </div>
           </div>
         </section>
@@ -576,10 +606,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="email-config.js?v=913"></script>
-  <script type="module" src="firebase-devices.js?v=913"></script>
-  <script type="module" src="access-admin.js?v=913"></script>
-  <script type="module" src="firebase-troca.js?v=913"></script>
-  <script src="app.js?v=915" defer></script>
+  <script src="email-config.js?v=917"></script>
+  <script type="module" src="firebase-devices.js?v=917"></script>
+  <script type="module" src="access-admin.js?v=917"></script>
+  <script type="module" src="firebase-troca.js?v=923"></script>
+  <script src="app.js?v=919" defer></script>
 </body>
 </html>

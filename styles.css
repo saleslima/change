@@ -2508,6 +2508,83 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   background: #f5f9fc;
 }
 
+.troca-funcao-group {
+  margin-top: 4px;
+  text-align: left;
+}
+
+.admin-cpa-block {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-check-group {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(141, 183, 216, .14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .02);
+}
+
+.admin-check-group legend {
+  padding: 0 4px;
+  color: var(--cyan);
+  font-size: .64rem;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+
+.admin-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(141, 183, 216, .14);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--text) 88%, transparent);
+  background: rgba(255, 255, 255, .03);
+  font-size: .82rem;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .18s ease, background .18s ease, color .18s ease;
+}
+
+.admin-check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--cyan);
+}
+
+.admin-check:has(input:checked) {
+  border-color: rgba(75, 213, 255, .42);
+  color: var(--text);
+  background: rgba(75, 213, 255, .08);
+}
+
+.admin-btl-field {
+  animation: admin-btl-in .22s ease;
+}
+
+@keyframes admin-btl-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .auth-submit,
 .admin-primary {
   min-height: 50px;
@@ -2869,6 +2946,15 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   border-color: rgba(90, 242, 177, .3);
   color: var(--green);
   background: rgba(90, 242, 177, .08);
+}
+
+.troca-action.done,
+.troca-action:disabled {
+  opacity: .72;
+  cursor: default;
+  border-color: rgba(141, 183, 216, .22);
+  color: color-mix(in srgb, var(--muted) 88%, var(--text));
+  background: rgba(255, 255, 255, .03);
 }
 
 .troca-action.remove {
@@ -3326,7 +3412,9 @@ html[data-theme="light"] .admin-field input,
 html[data-theme="light"] .admin-field select,
 html[data-theme="light"] .admin-form,
 html[data-theme="light"] .admin-list-panel,
-html[data-theme="light"] .admin-list-card {
+html[data-theme="light"] .admin-list-card,
+html[data-theme="light"] .admin-check-group,
+html[data-theme="light"] .admin-check {
   background: rgba(255, 255, 255, .68);
 }
 
