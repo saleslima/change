@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.7-calendario-equipe';
+const CACHE_NAME = 'civiloff-v9.11-indeferir-pdf';
 const APP_SHELL = [
   './',
   './index.html',

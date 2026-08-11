@@ -3005,6 +3005,24 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   letter-spacing: .04em;
 }
 
+.troca-denied-tag {
+  color: #fff !important;
+  background: rgba(255, 93, 114, .88) !important;
+  font-weight: 900 !important;
+  letter-spacing: .04em;
+}
+
+.troca-denied-copy {
+  margin: 8px 0 0;
+  color: #ff9aaa;
+  font-size: .78rem;
+  font-weight: 750;
+}
+
+.troca-doc-pdf-actions {
+  margin-top: 12px;
+}
+
 .access-dialog .access-icon {
   border-color: rgba(75, 213, 255, .3);
   color: var(--cyan);
@@ -3890,6 +3908,21 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
   box-shadow: 0 0 16px rgba(66, 231, 160, .24);
 }
 
+.timeline-step.is-denied {
+  border-color: rgba(255, 93, 114, .42);
+  background: rgba(255, 93, 114, .06);
+}
+
+.timeline-step.is-denied .timeline-check {
+  color: #fff;
+  border-color: #ff5d72;
+  background: #ff5d72;
+}
+
+.timeline-people li.is-denied strong {
+  color: #ff9aaa;
+}
+
 .timeline-step strong,
 .timeline-step small {
   display: block;
@@ -3959,6 +3992,12 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 .troca-tracking-card.is-ok {
   border-color: rgba(70, 210, 140, .45) !important;
   box-shadow: inset 0 0 0 1px rgba(70, 210, 140, .14);
+}
+
+.troca-tracking-card.is-denied,
+.troca-message-card.is-denied {
+  border-color: rgba(255, 93, 114, .45) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 93, 114, .14);
 }
 
 .troca-vigentes-section,

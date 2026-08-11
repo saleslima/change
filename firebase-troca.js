@@ -15,6 +15,20 @@ const TROCAS_INBOX_PATH = 'civiloff/v1/trocas/inbox';
 const TROCAS_DOCS_PATH = 'civiloff/v1/trocas/documents';
 const TROCAS_PROPOSALS_PATH = 'civiloff/v1/trocas/proposals';
 const TEAMS = ['A', 'B', 'C', 'D', 'E'];
+const RANK_LABELS = Object.freeze({
+  SD_PM: 'Sd PM',
+  CB_PM: 'Cb PM',
+  '3SGT_PM': '3º Sgt PM',
+  '2SGT_PM': '2º Sgt PM',
+  '1SGT_PM': '1º Sgt PM',
+  SUBTEN_PM: 'Subten PM',
+  '2TEN_PM': '2º Ten PM',
+  '1TEN_PM': '1º Ten PM',
+  CAP_PM: 'Cap PM',
+  MAJ_PM: 'Maj PM',
+  TEN_CEL_PM: 'Ten Cel PM',
+  CEL_PM: 'Cel PM'
+});
 const dayTeamSequence = ['B', 'A', 'B', 'A', 'E'];
 const nightTeamSequence = ['D', 'E', 'C', 'D', 'C'];
 const baseDate = new Date(2024, 0, 1, 12);
@@ -27,12 +41,16 @@ let unsubscribeMyDocs = null;
 let unsubscribeMyRequests = null;
 let unsubscribeAdminRequests = null;
 let unsubscribeAdminDocs = null;
+let unsubscribeUsersDir = null;
 let inboxCache = {};
 let myDocsCache = {};
 let myRequestsCache = {};
 let adminRequestsCache = {};
 let adminDocsCache = {};
+let usersDirectory = {};
 let openDocumentId = '';
+let openDocumentCache = null;
+let editingRequestId = '';
 let activeProposalMessage = null;
 let proposalVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
 let requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
@@ -44,6 +62,9 @@ const els = {
   inboxBadge: document.querySelector('#trocaInboxBadge'),
   requestDialog: document.querySelector('#trocaRequestDialog'),
   requestForm: document.querySelector('#trocaRequestForm'),
+  requestTitle: document.querySelector('#trocaRequestTitle'),
+  requestIntro: document.querySelector('#trocaRequestIntro'),
+  requestSubmit: document.querySelector('#trocaRequestSubmit'),
   requestDate: document.querySelector('#trocaDateInput'),
   requestCalendarTitle: document.querySelector('#requestCalendarTitle'),
   requestCalendarGrid: document.querySelector('#requestCalendarGrid'),
@@ -85,6 +106,9 @@ const els = {
   docTimeline: document.querySelector('#trocaTimeline'),
   docSignAreas: document.querySelector('#trocaDocSignAreas'),
   docStatus: document.querySelector('#trocaDocStatus'),
+  docPdfActions: document.querySelector('#trocaDocPdfActions'),
+  viewPdf: document.querySelector('#viewTrocaPdf'),
+  downloadPdf: document.querySelector('#downloadTrocaPdf'),
   closeDoc: document.querySelector('#closeTrocaDoc')
 };
 
@@ -117,9 +141,100 @@ function userDisplayName(user) {
   return user?.warName || user?.name || 'Usuário';
 }
 
+function rankLabel(rank) {
+  if (!rank) return '';
+  if (rank === 'ADMIN') return 'Administrador';
+  return RANK_LABELS[rank] || String(rank).replaceAll('_', ' ');
+}
+
+function normalizeRe(value) {
+  const cleaned = String(value || '').toUpperCase().replace(/[^0-9AB]/g, '');
+  const first = cleaned.slice(0, 6).replace(/\D/g, '');
+  const last = cleaned.slice(6, 7).replace(/[^0-9AB]/g, '');
+  return `${first}${last}`.slice(0, 7);
+}
+
+function formatRe(value) {
+  const raw = normalizeRe(value);
+  if (raw.length <= 6) return raw;
+  return `${raw.slice(0, 6)}-${raw.slice(6)}`;
+}
+
+function pickIdentity(parts = {}, userKey = '') {
+  const user = userKey ? usersDirectory[userKey] : null;
+  const re = parts.re || user?.re || '';
+  const reMasked = parts.reMasked || user?.reMasked || formatRe(re);
+  return {
+    name: parts.name || user?.name || '',
+    warName: parts.warName || user?.warName || parts.name || user?.name || '',
+    rank: parts.rank || user?.rank || '',
+    re,
+    reMasked,
+    userKey: userKey || parts.userKey || ''
+  };
+}
+
+function currentUserIdentity() {
+  return pickIdentity({
+    name: currentUser?.name || '',
+    warName: currentUser?.warName || '',
+    rank: currentUser?.rank || '',
+    re: currentUser?.re || '',
+    reMasked: currentUser?.reMasked || ''
+  }, currentUserKey);
+}
+
+function requesterIdentity(source = {}) {
+  return pickIdentity({
+    name: source.fromName || source.partyA?.name || '',
+    warName: source.fromWarName || source.partyA?.warName || '',
+    rank: source.fromRank || source.partyA?.rank || '',
+    re: source.fromRe || source.partyA?.re || '',
+    reMasked: source.fromReMasked || source.partyA?.reMasked || ''
+  }, source.fromUserKey || source.partyA?.userKey || '');
+}
+
+function proposerIdentity(source = {}) {
+  return pickIdentity({
+    name: source.proposalByName || source.selectedByName || source.partyB?.name || '',
+    warName: source.proposalByWarName || source.selectedByWarName || source.partyB?.warName || '',
+    rank: source.proposalByRank || source.selectedByRank || source.partyB?.rank || '',
+    re: source.proposalByRe || source.selectedByRe || source.partyB?.re || '',
+    reMasked: source.proposalByReMasked || source.selectedByReMasked || source.partyB?.reMasked || ''
+  }, source.proposalBy || source.selectedBy || source.partyB?.userKey || '');
+}
+
+function officerLine(person, fallback = 'Usuário') {
+  if (!person) return fallback;
+  const war = person.warName || person.name || fallback;
+  const rank = rankLabel(person.rank);
+  const re = person.reMasked || formatRe(person.re);
+  const head = [rank, war].filter(Boolean).join(' ') || fallback;
+  return re ? `${head} · RE ${re}` : head;
+}
+
+function requesterWriteFields(identity = currentUserIdentity()) {
+  return {
+    fromName: identity.name || identity.warName || 'Usuário',
+    fromWarName: identity.warName || identity.name || '',
+    fromRank: identity.rank || '',
+    fromRe: identity.re || '',
+    fromReMasked: identity.reMasked || formatRe(identity.re)
+  };
+}
+
+function proposerWriteFields(identity = currentUserIdentity()) {
+  return {
+    proposalByName: identity.name || identity.warName || 'Interessado',
+    proposalByWarName: identity.warName || identity.name || '',
+    proposalByRank: identity.rank || '',
+    proposalByRe: identity.re || '',
+    proposalByReMasked: identity.reMasked || formatRe(identity.re)
+  };
+}
+
 function fullUserLabel(user) {
-  const rank = user?.rank ? `${String(user.rank).replaceAll('_', ' ')} · ` : '';
-  return `${rank}${user?.name || userDisplayName(user)}`;
+  return officerLine(pickIdentity(user || {}, user?.userKey || ''), userDisplayName(user));
 }
 
 function formatDateBr(iso) {
@@ -164,6 +279,24 @@ function targetTeamText(teams) {
   return list.map((team) => `Equipe ${team}`).join(', ');
 }
 
+function isRequestStillEditable(request) {
+  return Boolean(
+    request
+    && request.status === 'open'
+    && !request.documentId
+    && !request.selectedBy
+    && !request.selectedProposalId
+  );
+}
+
+function isCurrentRequester(request) {
+  return Boolean(currentUserKey && request?.fromUserKey === currentUserKey);
+}
+
+function isCurrentAdmin() {
+  return currentUser?.profile === 'admin';
+}
+
 function teamPair(doc) {
   return [...new Set([normalizeTeam(doc?.fromTeam), normalizeTeam(doc?.interestedTeam)].filter(Boolean))];
 }
@@ -179,10 +312,33 @@ function updateBadge(count) {
   }
 }
 
-function isTrocaVigenteForMe(doc) {
+function isApprovalDenied(record) {
+  return record?.decision === 'denied' || record?.status === 'denied';
+}
+
+function isStepDenied(doc, step) {
+  if (step === 2) return doc?.status === 'step2-denied' || doc?.steps?.step2?.status === 'denied';
+  if (step === 3) return doc?.status === 'step3-denied' || doc?.steps?.step3?.status === 'denied';
+  return false;
+}
+
+function isDocDenied(doc) {
+  return isStepDenied(doc, 2) || isStepDenied(doc, 3) || doc?.overallStatus === 'INDEFERIDO';
+}
+
+function isInvolvedInDoc(doc) {
   if (!doc || !currentUserKey) return false;
-  const iAmParty = [doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey);
-  if (!iAmParty) return false;
+  if ([doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey)) return true;
+  const approvals = [...Object.values(doc.approvals?.supervisors || {}), ...Object.values(doc.approvals?.chiefs || {})];
+  if (approvals.some((item) => item?.userKey === currentUserKey)) return true;
+  const team = userTeam(currentUser);
+  const profile = userProfile(currentUser);
+  return teamPair(doc).includes(team) && ['supervisor', 'operations-chief'].includes(profile);
+}
+
+function isTrocaVigenteForMe(doc) {
+  if (!isInvolvedInDoc(doc)) return false;
+  if (isDocDenied(doc)) return true;
   if (doc.status !== 'completed') return true;
   return isWithinFulfillmentWindow(doc.requestDate, doc.counterDate);
 }
@@ -208,10 +364,39 @@ function myVigentes() {
       status: request.status,
       requestDate: request.requestDate,
       counterDate: request.counterDate || '',
+      fromUserKey: request.fromUserKey,
+      fromName: request.fromName,
+      fromWarName: request.fromWarName,
+      fromRank: request.fromRank,
+      fromRe: request.fromRe,
+      fromReMasked: request.fromReMasked,
       fromTeam: request.fromTeam,
+      targetTeams: request.targetTeams || [],
+      documentId: request.documentId || '',
+      selectedBy: request.selectedBy || '',
+      selectedByName: request.selectedByName || '',
+      selectedByWarName: request.selectedByWarName || '',
+      selectedByRank: request.selectedByRank || '',
+      selectedByRe: request.selectedByRe || '',
+      selectedByReMasked: request.selectedByReMasked || '',
+      selectedProposalId: request.selectedProposalId || '',
       interestedTeam: request.selectedTeam || '',
-      partyA: { name: request.fromName, warName: request.fromWarName, userKey: request.fromUserKey },
-      partyB: { name: request.selectedByName || 'Aguardando proposta', warName: '', userKey: request.selectedBy || '' }
+      partyA: {
+        name: request.fromName,
+        warName: request.fromWarName,
+        rank: request.fromRank,
+        re: request.fromRe,
+        reMasked: request.fromReMasked,
+        userKey: request.fromUserKey
+      },
+      partyB: {
+        name: request.selectedByName || 'Aguardando proposta',
+        warName: request.selectedByWarName || '',
+        rank: request.selectedByRank || '',
+        re: request.selectedByRe || '',
+        reMasked: request.selectedByReMasked || '',
+        userKey: request.selectedBy || ''
+      }
     }));
   return [...docs, ...openRequests].sort((a, b) => (
     (Number(b.updatedAt) || Number(b.createdAt) || 0) - (Number(a.updatedAt) || Number(a.createdAt) || 0)
@@ -235,6 +420,7 @@ function renderVigentesList() {
     const card = document.createElement('article');
     card.className = 'troca-message-card troca-tracking-card';
     if (doc.status === 'completed') card.classList.add('is-ok');
+    if (isDocDenied(doc)) card.classList.add('is-denied');
 
     const title = document.createElement('h3');
     const meta = document.createElement('p');
@@ -248,20 +434,32 @@ function renderVigentesList() {
 
     if (doc.kind === 'open-request') {
       title.textContent = 'Pedido vigente · aguardando proposta';
-      meta.textContent = statusStepText(doc.status, doc);
-      detail.textContent = `Dia solicitado: ${formatDateBr(doc.requestDate)} · Equipe ${doc.fromTeam || '—'}`;
+      const canManage = isCurrentRequester(doc) && isRequestStillEditable(doc);
+      meta.textContent = canManage
+        ? `${statusStepText(doc.status, doc)} · Você pode editar ou apagar até aceitar uma proposta.`
+        : statusStepText(doc.status, doc);
+      const destinos = doc.targetTeams?.length ? ` · Destino: ${targetTeamText(doc.targetTeams)}` : '';
+      detail.textContent = `${officerLine(requesterIdentity(doc))} · Dia solicitado: ${formatDateBr(doc.requestDate)} · Equipe ${doc.fromTeam || '—'}${destinos}`;
     } else {
       const isOk = doc.status === 'completed';
-      title.textContent = isOk ? 'Troca vigente · OK' : 'Troca vigente · PENDENTE';
-      meta.textContent = `${isOk ? 'OK · 3 passos concluídos' : pendingDetail(doc)} · Com ${otherName}.`;
+      const denied = isDocDenied(doc);
+      title.textContent = isOk ? 'Troca vigente · OK' : denied ? 'Troca vigente · INDEFERIDA' : 'Troca vigente · PENDENTE';
+      meta.textContent = `${isOk ? 'OK · 3 passos concluídos' : publicStepStatus(doc)} · Com ${otherName}.`;
       detail.textContent = `Cumprimento: ${formatDateBr(doc.requestDate)} ↔ ${formatDateBr(doc.counterDate || '—')} · Equipes ${doc.fromTeam || '—'} / ${doc.interestedTeam || '—'}`;
     }
 
     card.append(title, meta, detail);
     const actions = document.createElement('div');
     actions.className = 'troca-message-actions';
-    if (doc.kind !== 'open-request') {
+    if (doc.kind === 'open-request') {
+      if (isCurrentRequester(doc) && isRequestStillEditable(doc)) {
+        addAction(actions, 'Editar data/equipes', 'accept', () => openRequestDialogForEdit(doc));
+        addAction(actions, 'Apagar pedido', 'remove', () => handleRequesterCancelRequest(doc));
+        card.appendChild(actions);
+      }
+    } else {
       addAction(actions, 'Ver status / documento', 'accept', () => openDocument(doc.id || doc.requestId));
+      if (doc.status === 'completed') appendPdfActions(actions, doc.id || doc.requestId);
       card.appendChild(actions);
     }
     els.vigentesList.appendChild(card);
@@ -289,7 +487,7 @@ function renderInboxPanel() {
 function pendingAdminRequests() {
   return Object.entries(adminRequestsCache)
     .map(([id, request]) => ({ id, ...request }))
-    .filter((request) => request.documentId && request.status !== 'completed')
+    .filter((request) => request.status !== 'completed' && (request.documentId || !isRequestStillEditable(request)))
     .sort((a, b) => (Number(b.selectedAt) || Number(b.updatedAt) || 0) - (Number(a.selectedAt) || Number(a.updatedAt) || 0));
 }
 
@@ -319,8 +517,27 @@ function addAction(actions, text, className, handler) {
   return button;
 }
 
+function appendPdfActions(actions, documentId) {
+  if (!actions || !documentId) return;
+  addAction(actions, 'Ver PDF', 'accept', () => handleViewPdf(documentId));
+  addAction(actions, 'Baixar PDF', '', () => handleDownloadPdf(documentId));
+}
+
+function addAdminDeleteButton(actions, requestId) {
+  if (!requestId || !actions) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'admin-action danger';
+  button.textContent = 'Excluir';
+  button.addEventListener('click', () => handleAdminDeleteTroca(requestId));
+  actions.appendChild(button);
+  return button;
+}
+
 function statusStepText(status, requestOrDoc = {}) {
   if (status === 'completed') return 'OK · 3 passos concluídos';
+  if (status === 'step2-denied') return 'INDEFERIDO · Passo 2 — supervisores';
+  if (status === 'step3-denied') return 'INDEFERIDO · Passo 3 — chefes de operações';
   if (status === 'step1-requester') return 'PENDENTE · Passo 1 — assinatura do solicitante';
   if (status === 'step2-supervisors') return 'PENDENTE · Passo 2 — ciência e assinatura dos supervisores';
   if (status === 'step3-chiefs') return 'PENDENTE · Passo 3 — ciência e assinatura dos chefes de operações';
@@ -344,8 +561,8 @@ function trackingMessageId(requestId) {
 }
 
 function buildTrackingPayload(doc, partyRole) {
-  const overall = doc.status === 'completed' ? 'OK' : 'PENDENTE';
-  const statusText = doc.status === 'completed' ? 'OK · 3 passos concluídos' : pendingDetail(doc);
+  const overall = isDocDenied(doc) ? 'INDEFERIDO' : doc.status === 'completed' ? 'OK' : 'PENDENTE';
+  const statusText = doc.status === 'completed' ? 'OK · 3 passos concluídos' : publicStepStatus(doc);
   const other = partyRole === 'requester' ? doc.partyB : doc.partyA;
   return {
     kind: 'troca-tracking',
@@ -356,7 +573,7 @@ function buildTrackingPayload(doc, partyRole) {
     fromTeam: doc.fromTeam || '',
     interestedTeam: doc.interestedTeam || '',
     partyRole,
-    otherName: other?.warName || other?.name || 'Contraparte',
+    otherName: officerLine(pickIdentity(other || {}, other?.userKey || ''), other?.warName || other?.name || 'Contraparte'),
     docStatus: doc.status || '',
     overallStatus: overall,
     statusText,
@@ -403,9 +620,9 @@ function renderInboxList() {
     detail.className = 'troca-message-from';
 
     if (message.kind === 'proposal') {
-      title.textContent = `Proposta de ${message.proposalByName || 'Interessado'}`;
+      title.textContent = `Contraproposta de ${officerLine(proposerIdentity(message), 'Interessado')}`;
       meta.textContent = `Você quer trocar ${formatDateBr(message.requestDate)}. A contraproposta é ${formatDateBr(message.counterDate)} e já está assinada pelo interessado.`;
-      detail.textContent = `Equipe ${message.proposalTeam || '—'} · Você pode comparar várias propostas antes de aceitar uma.`;
+      detail.textContent = `Equipe ${message.proposalTeam || '—'} · Compare as propostas antes de aceitar uma.`;
     } else if (message.kind === 'sign-request') {
       title.textContent = 'Passo 1 · Sua assinatura';
       meta.textContent = `A proposta de ${message.otherName || 'interessado'} foi aceita. Assine o documento para concluir o Passo 1.`;
@@ -413,8 +630,8 @@ function renderInboxList() {
     } else if (message.kind === 'approval-request') {
       const roleText = message.approvalRole === 'supervisor' ? 'Supervisor' : 'Chefe de Operações';
       const step = message.approvalRole === 'supervisor' ? 2 : 3;
-      title.textContent = `Passo ${step} · Ciente ${roleText}`;
-      meta.textContent = `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Clique para dar ciência e assinar pela Equipe ${message.approvalTeam || '—'}.`;
+      title.textContent = `Passo ${step} · Ciente ou indeferir · ${roleText}`;
+      meta.textContent = `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Abra o documento para dar ciência e assinar ou indeferir pela Equipe ${message.approvalTeam || '—'}.`;
       detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
     } else if (message.kind === 'selected-notice') {
       title.textContent = 'Sua contraproposta foi escolhida';
@@ -422,19 +639,38 @@ function renderInboxList() {
       detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
     } else if (message.kind === 'troca-tracking') {
       const isOk = message.overallStatus === 'OK' || message.docStatus === 'completed';
-      title.textContent = isOk ? 'Troca acompanhada · OK' : 'Troca em acompanhamento · PENDENTE';
+      const denied = message.overallStatus === 'INDEFERIDO' || String(message.docStatus || '').includes('denied');
+      title.textContent = isOk ? 'Troca acompanhada · OK' : denied ? 'Troca acompanhada · INDEFERIDA' : 'Troca em acompanhamento · PENDENTE';
       meta.textContent = `${message.statusText || statusStepText(message.docStatus)} · Com ${message.otherName || 'contraparte'}.`;
       detail.textContent = `Cumprimento: ${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)} · Disponível até ${formatDateBr(message.visibleUntil || fulfillmentEndIso(message.requestDate, message.counterDate))}.`;
     } else if (message.kind === 'completed-notice') {
       title.textContent = 'Troca concluída · OK';
-      meta.textContent = message.noticeText || 'Os 3 passos foram concluídos.';
+      meta.textContent = message.noticeText || 'Os 3 passos foram concluídos. Você já pode ver ou baixar o PDF.';
+      detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
+    } else if (message.kind === 'denied-notice') {
+      title.textContent = `Troca indeferida · Passo ${message.deniedStep || '—'}`;
+      meta.textContent = message.noticeText || 'Um responsável indeferiu esta troca neste passo.';
       detail.textContent = `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`;
     } else if (message.kind === 'proposal-rejected') {
       title.textContent = 'Proposta não escolhida';
       meta.textContent = message.noticeText || 'O solicitante não escolheu esta alternativa.';
       detail.textContent = 'Enquanto o pedido estiver aberto, você pode enviar outra alternativa.';
+    } else if (message.kind === 'request-updated') {
+      title.textContent = 'Pedido de troca atualizado';
+      meta.textContent = message.noticeText || `O solicitante alterou o dia para ${formatDateBr(message.requestDate)}.`;
+      detail.textContent = message.targetTeams?.length
+        ? `Equipes de destino: ${targetTeamText(message.targetTeams)}.`
+        : 'Confira o pedido atualizado na sua caixa.';
+    } else if (message.kind === 'request-cancelled') {
+      title.textContent = 'Pedido de troca cancelado';
+      meta.textContent = message.noticeText || 'O solicitante cancelou este pedido.';
+      detail.textContent = message.requestDate ? `Dia que havia sido pedido: ${formatDateBr(message.requestDate)}.` : 'O pedido não está mais disponível.';
+    } else if (message.kind === 'troca-deleted') {
+      title.textContent = 'Troca excluída';
+      meta.textContent = message.noticeText || 'Esta troca foi excluída pelo administrador.';
+      detail.textContent = message.requestDate ? `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate || '—')}` : 'O documento e as mensagens relacionadas foram removidos.';
     } else {
-      title.textContent = `${message.fromName || 'Usuário'} solicita troca`;
+      title.textContent = `${officerLine(requesterIdentity(message))} solicita troca`;
       meta.textContent = `Dia solicitado: ${formatDateBr(message.requestDate || message.date)}.`;
       detail.textContent = `Você recebeu este pedido como Despachador da Equipe ${message.recipientTeam || userTeam(currentUser) || '—'}. Escolha um dos dias em que sua equipe está de serviço.`;
     }
@@ -442,7 +678,9 @@ function renderInboxList() {
     if (message.kind === 'troca-tracking') {
       card.classList.add('troca-tracking-card');
       if (message.overallStatus === 'OK' || message.docStatus === 'completed') card.classList.add('is-ok');
+      if (message.overallStatus === 'INDEFERIDO' || String(message.docStatus || '').includes('denied')) card.classList.add('is-denied');
     }
+    if (message.kind === 'denied-notice') card.classList.add('is-denied');
 
     card.append(title, meta, detail);
     const actions = document.createElement('div');
@@ -452,8 +690,11 @@ function renderInboxList() {
     } else if (message.kind === 'proposal') {
       addAction(actions, 'Aceitar proposta', 'accept', () => handleSelectProposal(message));
       addAction(actions, 'Rejeitar', 'remove', () => handleRejectProposal(message));
-    } else if (['sign-request', 'approval-request', 'completed-notice', 'selected-notice', 'troca-tracking'].includes(message.kind) && message.documentId) {
-      addAction(actions, message.kind === 'completed-notice' || message.kind === 'troca-tracking' ? 'Ver status / documento' : 'Abrir documento', 'accept', () => openDocument(message.documentId));
+    } else if (['sign-request', 'approval-request', 'completed-notice', 'denied-notice', 'selected-notice', 'troca-tracking'].includes(message.kind) && message.documentId) {
+      addAction(actions, message.kind === 'completed-notice' || message.kind === 'troca-tracking' || message.kind === 'denied-notice' ? 'Ver status / documento' : 'Abrir documento', 'accept', () => openDocument(message.documentId));
+      if (message.kind === 'completed-notice' || ((message.kind === 'troca-tracking') && (message.overallStatus === 'OK' || message.docStatus === 'completed'))) {
+        appendPdfActions(actions, message.documentId);
+      }
     }
     if (message.kind === 'troca-tracking') {
       if (!isWithinFulfillmentWindow(message.requestDate, message.counterDate)) {
@@ -479,14 +720,15 @@ function renderAdminList() {
     card.className = 'admin-list-card';
     const info = document.createElement('div');
     const strong = document.createElement('strong');
-    strong.textContent = `${request.fromName || 'Solicitante'} ↔ ${request.selectedByName || 'Interessado'}`;
+    strong.textContent = `${officerLine(requesterIdentity(request), 'Solicitante')} ↔ ${officerLine(proposerIdentity(request), request.selectedByName || 'Interessado')}`;
     const span = document.createElement('span');
     span.textContent = `${formatDateBr(request.requestDate)} ↔ ${formatDateBr(request.counterDate)}`;
     const tags = document.createElement('div');
     tags.className = 'admin-tags';
     const status = document.createElement('small');
-    status.className = 'troca-pending-tag';
     const requestDoc = adminDocsCache[request.documentId];
+    const denied = isDocDenied(requestDoc) || String(request.status || '').includes('denied');
+    status.className = denied ? 'troca-denied-tag' : 'troca-pending-tag';
     status.textContent = requestDoc ? pendingDetail(requestDoc) : statusStepText(request.status, request);
     const teams = document.createElement('small');
     teams.textContent = `Equipes ${request.fromTeam || '—'} / ${request.selectedTeam || '—'}`;
@@ -502,6 +744,7 @@ function renderAdminList() {
       btn.addEventListener('click', () => openDocument(request.documentId));
       actions.appendChild(btn);
     }
+    addAdminDeleteButton(actions, request.id || request.documentId);
     card.append(info, actions);
     els.adminList.appendChild(card);
   });
@@ -518,7 +761,7 @@ function renderSignedAdminList() {
     card.className = 'admin-list-card';
     const info = document.createElement('div');
     const strong = document.createElement('strong');
-    strong.textContent = `${doc.partyA?.warName || doc.partyA?.name || 'Solicitante'} ↔ ${doc.partyB?.warName || doc.partyB?.name || 'Interessado'}`;
+    strong.textContent = `${officerLine(requesterIdentity(doc), 'Solicitante')} ↔ ${officerLine(proposerIdentity(doc), 'Interessado')}`;
     const span = document.createElement('span');
     span.textContent = `${formatDateBr(doc.requestDate)} ↔ ${formatDateBr(doc.counterDate)}`;
     const tags = document.createElement('div');
@@ -543,6 +786,7 @@ function renderSignedAdminList() {
     pdfBtn.textContent = 'Baixar PDF';
     pdfBtn.addEventListener('click', () => downloadDocumentPdf(doc));
     actions.append(viewBtn, pdfBtn);
+    addAdminDeleteButton(actions, doc.requestId || doc.id);
     card.append(info, actions);
     els.signedList.appendChild(card);
   });
@@ -589,6 +833,25 @@ function publishTrocaCalendarDates() {
   }));
 }
 
+function subscribeUsersDirectory() {
+  if (unsubscribeUsersDir) unsubscribeUsersDir();
+  unsubscribeUsersDir = null;
+  usersDirectory = {};
+  if (!currentUserKey) return;
+  unsubscribeUsersDir = onValue(ref(database, USERS_PATH), (snapshot) => {
+    usersDirectory = snapshot.val() || {};
+    if (els.inboxDialog?.open) renderInboxPanel();
+    if (currentUser?.profile === 'admin') {
+      renderAdminList();
+      renderSignedAdminList();
+    }
+    if (openDocumentId && els.docDialog?.open) {
+      const doc = adminDocsCache[openDocumentId] || myDocsCache[openDocumentId];
+      if (doc) renderDocument({ id: openDocumentId, ...doc });
+    }
+  }, (error) => console.warn('[CivilOff] Cadastro para identidade da troca:', error));
+}
+
 function subscribeInbox() {
   if (unsubscribeInbox) unsubscribeInbox();
   if (unsubscribeMyDocs) unsubscribeMyDocs();
@@ -614,7 +877,7 @@ function subscribeInbox() {
     const all = snapshot.val() || {};
     const mine = {};
     Object.entries(all).forEach(([id, doc]) => {
-      if ([doc?.partyA?.userKey, doc?.partyB?.userKey].includes(currentUserKey)) {
+      if (isInvolvedInDoc({ ...doc, requestId: doc?.requestId || id })) {
         mine[id] = doc;
       }
     });
@@ -700,12 +963,11 @@ async function createTrocaRequest(requestDate, targetTeams) {
   const requestRef = push(ref(database, TROCAS_REQUESTS_PATH));
   const requestId = requestRef.key;
   const writes = {};
+  const requester = currentUserIdentity();
   writes[`${TROCAS_REQUESTS_PATH}/${requestId}`] = {
     requestDate,
     fromUserKey: currentUserKey,
-    fromName: currentUser.name || userDisplayName(currentUser),
-    fromWarName: currentUser.warName || '',
-    fromRank: currentUser.rank || '',
+    ...requesterWriteFields(requester),
     fromTeam,
     targetTeams: teams,
     status: 'open',
@@ -719,7 +981,7 @@ async function createTrocaRequest(requestDate, targetTeams) {
       requestId,
       requestDate,
       fromUserKey: currentUserKey,
-      fromName: currentUser.warName || currentUser.name || 'Usuário',
+      ...requesterWriteFields(requester),
       fromTeam,
       recipientTeam: recipient.team,
       status: 'pending',
@@ -729,6 +991,241 @@ async function createTrocaRequest(requestDate, targetTeams) {
   });
   await update(ref(database), writes);
   return { requestId, teams, recipientCount: recipients.length };
+}
+
+async function listInboxEntries() {
+  const snapshot = await get(ref(database, TROCAS_INBOX_PATH));
+  const all = snapshot.val() || {};
+  const entries = [];
+  Object.entries(all).forEach(([userKey, messages]) => {
+    Object.entries(messages || {}).forEach(([messageId, message]) => {
+      entries.push({ userKey, messageId, message });
+    });
+  });
+  return entries;
+}
+
+function pushInboxNotice(writes, userKey, payload) {
+  if (!userKey) return;
+  const messageId = push(ref(database, `${TROCAS_INBOX_PATH}/${userKey}`)).key;
+  writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}`] = {
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...payload
+  };
+}
+
+async function validateRequesterDutyDay(requestDate) {
+  if (!currentUserKey || !currentUser) throw new Error('Faça login para alterar a troca.');
+  if (userProfile(currentUser) !== 'dispatcher') throw new Error('Somente o perfil Despachador solicita e edita pedidos de troca.');
+  const fromTeam = userTeam(currentUser);
+  if (!fromTeam) throw new Error('Seu cadastro ainda não possui equipe.');
+  const requestDateObject = fromLocalISO(requestDate);
+  if (!requestDateObject || requestDate < todayIso()) throw new Error('Escolha um dia de serviço válido e não passado.');
+  if (!isTeamOnDuty(requestDateObject, fromTeam)) {
+    throw new Error(`Escolha um dia em que a Equipe ${fromTeam} esteja de serviço.`);
+  }
+  return fromTeam;
+}
+
+async function updateOpenTrocaRequest(requestId, requestDate, targetTeams) {
+  const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${requestId}`));
+  const request = requestSnap.val();
+  if (!request) throw new Error('Pedido de troca não encontrado.');
+  if (!isCurrentRequester(request)) throw new Error('Somente quem solicitou a troca pode editar este pedido.');
+  if (!isRequestStillEditable(request)) {
+    throw new Error('Não é possível editar depois de aceitar uma contraproposta. Somente o administrador pode excluir.');
+  }
+
+  const fromTeam = await validateRequesterDutyDay(requestDate);
+  const teams = [...new Set(targetTeams.map(normalizeTeam).filter((team) => team && team !== fromTeam))];
+  if (!teams.length) throw new Error('Escolha pelo menos uma equipe diferente da sua.');
+  const recipients = await findRecipients(teams, currentUserKey);
+  if (!recipients.length) throw new Error('Nenhum Despachador ativo foi encontrado nas equipes selecionadas.');
+
+  const proposalsSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${requestId}`));
+  const proposals = proposalsSnap.val() || {};
+  const dateChanged = request.requestDate !== requestDate;
+  const previousTeams = new Set((request.targetTeams || []).map(normalizeTeam).filter(Boolean));
+  const nextTeams = new Set(teams);
+  const writes = {};
+
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/requestDate`] = requestDate;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/targetTeams`] = teams;
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}/updatedAt`] = serverTimestamp();
+
+  const inboxEntries = await listInboxEntries();
+  inboxEntries.forEach(({ userKey, messageId, message }) => {
+    if (message?.requestId !== requestId) return;
+    if (message.kind === 'request' || !message.kind) {
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}`] = null;
+      return;
+    }
+    if (message.kind === 'proposal') {
+      const proposal = proposals[message.proposalId];
+      if (proposal && !nextTeams.has(normalizeTeam(proposal.proposalTeam))) {
+        writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}`] = null;
+        return;
+      }
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/requestDate`] = requestDate;
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}/updatedAt`] = serverTimestamp();
+    }
+  });
+
+  const requester = currentUserIdentity();
+  const requesterFields = requesterWriteFields(requester);
+  Object.entries(requesterFields).forEach(([field, value]) => {
+    writes[`${TROCAS_REQUESTS_PATH}/${requestId}/${field}`] = value;
+  });
+  recipients.forEach((recipient) => {
+    const messageId = push(ref(database, `${TROCAS_INBOX_PATH}/${recipient.userKey}`)).key;
+    writes[`${TROCAS_INBOX_PATH}/${recipient.userKey}/${messageId}`] = {
+      kind: 'request',
+      requestId,
+      requestDate,
+      fromUserKey: currentUserKey,
+      ...requesterWriteFields(requester),
+      fromTeam,
+      recipientTeam: recipient.team,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+  });
+
+  const notifiedProposers = new Set();
+  Object.entries(proposals).forEach(([proposalId, proposal]) => {
+    const proposalTeam = normalizeTeam(proposal?.proposalTeam);
+    if (!nextTeams.has(proposalTeam)) {
+      writes[`${TROCAS_PROPOSALS_PATH}/${requestId}/${proposalId}/status`] = 'rejected';
+      writes[`${TROCAS_PROPOSALS_PATH}/${requestId}/${proposalId}/updatedAt`] = serverTimestamp();
+      if (proposal?.proposalBy && !notifiedProposers.has(proposal.proposalBy)) {
+        notifiedProposers.add(proposal.proposalBy);
+        pushInboxNotice(writes, proposal.proposalBy, {
+          kind: 'proposal-rejected',
+          requestId,
+          requestDate,
+          counterDate: proposal.counterDate || '',
+          noticeText: 'O solicitante removeu sua equipe deste pedido. A contraproposta foi cancelada.'
+        });
+      }
+      return;
+    }
+    writes[`${TROCAS_PROPOSALS_PATH}/${requestId}/${proposalId}/requestDate`] = requestDate;
+    writes[`${TROCAS_PROPOSALS_PATH}/${requestId}/${proposalId}/updatedAt`] = serverTimestamp();
+    if (dateChanged && proposal?.proposalBy && !notifiedProposers.has(proposal.proposalBy)) {
+      notifiedProposers.add(proposal.proposalBy);
+      pushInboxNotice(writes, proposal.proposalBy, {
+        kind: 'request-updated',
+        requestId,
+        requestDate,
+        targetTeams: teams,
+        noticeText: `O solicitante alterou o dia da troca para ${formatDateBr(requestDate)}.`
+      });
+    }
+  });
+
+  await update(ref(database), writes);
+  return { requestId, teams, recipientCount: recipients.length, dateChanged, teamsChanged: [...previousTeams].join() !== [...nextTeams].join() };
+}
+
+async function wipeTrocaRecords(requestId, { notify = [], noticeKind = 'troca-deleted', noticeText = '' } = {}) {
+  const proposalsSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${requestId}`));
+  const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${requestId}`));
+  const docSnap = await get(ref(database, `${TROCAS_DOCS_PATH}/${requestId}`));
+  const request = requestSnap.val() || {};
+  const doc = docSnap.val() || {};
+  const writes = {};
+  writes[`${TROCAS_REQUESTS_PATH}/${requestId}`] = null;
+  writes[`${TROCAS_DOCS_PATH}/${requestId}`] = null;
+  writes[`${TROCAS_PROPOSALS_PATH}/${requestId}`] = null;
+
+  const inboxEntries = await listInboxEntries();
+  inboxEntries.forEach(({ userKey, messageId, message }) => {
+    if (message?.requestId === requestId || message?.documentId === requestId) {
+      writes[`${TROCAS_INBOX_PATH}/${userKey}/${messageId}`] = null;
+    }
+  });
+
+  const seen = new Set();
+  notify.forEach((userKey) => {
+    if (!userKey || seen.has(userKey)) return;
+    seen.add(userKey);
+    pushInboxNotice(writes, userKey, {
+      kind: noticeKind,
+      requestId,
+      requestDate: request.requestDate || doc.requestDate || '',
+      counterDate: request.counterDate || doc.counterDate || '',
+      noticeText
+    });
+  });
+
+  await update(ref(database), writes);
+  if (openDocumentId === requestId) {
+    openDocumentId = '';
+    els.docDialog?.close();
+  }
+}
+
+async function handleRequesterCancelRequest(requestLike) {
+  const requestId = requestLike?.id || requestLike?.requestId;
+  if (!requestId) return;
+  if (!window.confirm('Apagar este pedido de troca? As equipes deixarão de vê-lo e as contrapropostas pendentes serão canceladas.')) {
+    return;
+  }
+  try {
+    const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${requestId}`));
+    const request = requestSnap.val();
+    if (!request) throw new Error('Pedido de troca não encontrado.');
+    if (!isCurrentRequester(request)) throw new Error('Somente quem solicitou a troca pode apagar este pedido.');
+    if (!isRequestStillEditable(request)) {
+      throw new Error('Depois de aceitar uma contraproposta, somente o administrador pode excluir.');
+    }
+    const proposalsSnap = await get(ref(database, `${TROCAS_PROPOSALS_PATH}/${requestId}`));
+    const notify = Object.values(proposalsSnap.val() || {})
+      .map((proposal) => proposal?.proposalBy)
+      .filter(Boolean);
+    await wipeTrocaRecords(requestId, {
+      notify,
+      noticeKind: 'request-cancelled',
+      noticeText: `${request.fromWarName || request.fromName || 'O solicitante'} cancelou o pedido de troca de ${formatDateBr(request.requestDate)}.`
+    });
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || 'Não foi possível apagar o pedido.');
+  }
+}
+
+async function handleAdminDeleteTroca(requestId) {
+  if (!requestId) return;
+  if (!isCurrentAdmin()) {
+    window.alert('Somente o administrador pode excluir uma troca após o aceite.');
+    return;
+  }
+  if (!window.confirm('Excluir esta troca? O documento, as assinaturas e as mensagens relacionadas serão removidos. Esta ação não pode ser desfeita.')) {
+    return;
+  }
+  try {
+    const requestSnap = await get(ref(database, `${TROCAS_REQUESTS_PATH}/${requestId}`));
+    const docSnap = await get(ref(database, `${TROCAS_DOCS_PATH}/${requestId}`));
+    const request = requestSnap.val() || {};
+    const doc = docSnap.val() || {};
+    const notify = [
+      request.fromUserKey,
+      request.selectedBy,
+      doc.partyA?.userKey,
+      doc.partyB?.userKey
+    ].filter(Boolean);
+    await wipeTrocaRecords(requestId, {
+      notify,
+      noticeKind: 'troca-deleted',
+      noticeText: 'Esta troca foi excluída pelo administrador.'
+    });
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || 'Não foi possível excluir a troca.');
+  }
 }
 
 function renderDutyCalendar({
@@ -898,7 +1395,9 @@ function openProposalDialog(message) {
   }
   if (els.proposalDate) els.proposalDate.value = '';
   if (els.proposalSelectedDate) els.proposalSelectedDate.textContent = `Selecione um dia em que a Equipe ${userTeam(currentUser) || '—'} esteja de serviço.`;
-  if (els.proposalIntro) els.proposalIntro.textContent = `${message.fromName || 'O solicitante'} quer trocar ${formatDateBr(message.requestDate)}. Só os dias de serviço da Equipe ${userTeam(currentUser) || '—'} estão habilitados.`;
+  if (els.proposalIntro) {
+    els.proposalIntro.textContent = `${officerLine(requesterIdentity(message), 'O solicitante')} quer trocar ${formatDateBr(message.requestDate)}. Só os dias de serviço da Equipe ${userTeam(currentUser) || '—'} estão habilitados.`;
+  }
   setStatus(els.proposalStatus);
   renderProposalCalendar();
   els.proposalDialog.showModal();
@@ -920,15 +1419,15 @@ async function createProposal(message, counterDate, signature) {
   const proposalId = push(ref(database, `${TROCAS_PROPOSALS_PATH}/${message.requestId}`)).key;
   const requesterMessageId = push(ref(database, `${TROCAS_INBOX_PATH}/${request.fromUserKey}`)).key;
   const now = Date.now();
+  const proposer = currentUserIdentity();
+  const proposerFields = proposerWriteFields(proposer);
   const proposal = {
     requestId: message.requestId,
     proposalId,
     requestDate: request.requestDate,
     counterDate,
     proposalBy: currentUserKey,
-    proposalByName: currentUser.name || userDisplayName(currentUser),
-    proposalByWarName: currentUser.warName || '',
-    proposalByRank: currentUser.rank || '',
+    ...proposerFields,
     proposalTeam: team,
     interestedSignature: signature,
     interestedSignedAt: now,
@@ -945,7 +1444,7 @@ async function createProposal(message, counterDate, signature) {
     requestDate: request.requestDate,
     counterDate,
     proposalBy: currentUserKey,
-    proposalByName: currentUser.warName || currentUser.name || 'Interessado',
+    ...proposerFields,
     proposalTeam: team,
     status: 'pending',
     createdAt: serverTimestamp(),
@@ -1100,17 +1599,30 @@ async function handleSelectProposal(message) {
       throw new Error('Esta proposta não está mais disponível.');
     }
 
+    const acceptedIdentity = proposerIdentity({
+      ...selected,
+      proposalBy: message.proposalBy || selected.proposalBy,
+      proposalByName: message.proposalByName || selected.proposalByName
+    });
+    const selectedPatch = {
+      selectedProposalId: message.proposalId,
+      selectedBy: message.proposalBy || selected.proposalBy,
+      selectedByName: acceptedIdentity.name || message.proposalByName || selected.proposalByName,
+      selectedByWarName: acceptedIdentity.warName,
+      selectedByRank: acceptedIdentity.rank,
+      selectedByRe: acceptedIdentity.re,
+      selectedByReMasked: acceptedIdentity.reMasked,
+      selectedTeam: message.proposalTeam || selected.proposalTeam,
+      counterDate: message.counterDate || selected.counterDate
+    };
+
     const tx = await runTransaction(requestRef, (request) => {
       // Se ainda vier null (corrida rara), devolve o snapshot conhecido para forçar nova tentativa.
       if (request === null) {
         return {
           ...existing,
           status: 'selected',
-          selectedProposalId: message.proposalId,
-          selectedBy: message.proposalBy || selected.proposalBy,
-          selectedByName: message.proposalByName || selected.proposalByName,
-          selectedTeam: message.proposalTeam || selected.proposalTeam,
-          counterDate: message.counterDate || selected.counterDate,
+          ...selectedPatch,
           selectedAt: Date.now(),
           updatedAt: Date.now()
         };
@@ -1119,11 +1631,7 @@ async function handleSelectProposal(message) {
       return {
         ...request,
         status: 'selected',
-        selectedProposalId: message.proposalId,
-        selectedBy: message.proposalBy || selected.proposalBy,
-        selectedByName: message.proposalByName || selected.proposalByName,
-        selectedTeam: message.proposalTeam || selected.proposalTeam,
-        counterDate: message.counterDate || selected.counterDate,
+        ...selectedPatch,
         selectedAt: Date.now(),
         updatedAt: Date.now()
       };
@@ -1135,11 +1643,7 @@ async function handleSelectProposal(message) {
         // Fallback sem transação (ambiente com cache inconsistente).
         await update(requestRef, {
           status: 'selected',
-          selectedProposalId: message.proposalId,
-          selectedBy: message.proposalBy || selected.proposalBy,
-          selectedByName: message.proposalByName || selected.proposalByName,
-          selectedTeam: message.proposalTeam || selected.proposalTeam,
-          counterDate: message.counterDate || selected.counterDate,
+          ...selectedPatch,
           selectedAt: Date.now(),
           updatedAt: serverTimestamp()
         });
@@ -1163,6 +1667,8 @@ async function handleSelectProposal(message) {
     const documentId = message.requestId;
     const requesterMessageId = push(ref(database, `${TROCAS_INBOX_PATH}/${request.fromUserKey}`)).key;
     const selectedNoticeId = push(ref(database, `${TROCAS_INBOX_PATH}/${selectedFresh.proposalBy}`)).key;
+    const requesterId = requesterIdentity(request);
+    const selectedId = proposerIdentity(selectedFresh);
     const doc = {
       requestId: message.requestId,
       requestDate: request.requestDate,
@@ -1176,9 +1682,11 @@ async function handleSelectProposal(message) {
       updatedAt: serverTimestamp(),
       partyA: {
         userKey: request.fromUserKey,
-        name: request.fromName || 'Solicitante',
-        warName: request.fromWarName || '',
-        rank: request.fromRank || '',
+        name: requesterId.name || request.fromName || 'Solicitante',
+        warName: requesterId.warName || request.fromWarName || '',
+        rank: requesterId.rank || request.fromRank || '',
+        re: requesterId.re || request.fromRe || '',
+        reMasked: requesterId.reMasked || request.fromReMasked || '',
         team: request.fromTeam || '',
         role: 'requester',
         signature: null,
@@ -1186,9 +1694,11 @@ async function handleSelectProposal(message) {
       },
       partyB: {
         userKey: selectedFresh.proposalBy,
-        name: selectedFresh.proposalByName || 'Interessado',
-        warName: selectedFresh.proposalByWarName || '',
-        rank: selectedFresh.proposalByRank || '',
+        name: selectedId.name || selectedFresh.proposalByName || 'Interessado',
+        warName: selectedId.warName || selectedFresh.proposalByWarName || '',
+        rank: selectedId.rank || selectedFresh.proposalByRank || '',
+        re: selectedId.re || selectedFresh.proposalByRe || '',
+        reMasked: selectedId.reMasked || selectedFresh.proposalByReMasked || '',
         team: selectedFresh.proposalTeam || '',
         role: 'interested',
         signature: selectedFresh.interestedSignature,
@@ -1219,7 +1729,7 @@ async function handleSelectProposal(message) {
       documentId,
       requestDate: request.requestDate,
       counterDate: selectedFresh.counterDate,
-      otherName: selectedFresh.proposalByWarName || selectedFresh.proposalByName || 'Interessado',
+      otherName: officerLine(proposerIdentity(selectedFresh), selectedFresh.proposalByWarName || selectedFresh.proposalByName || 'Interessado'),
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -1247,15 +1757,13 @@ async function handleSelectProposal(message) {
 function stepCompletion(doc) {
   const teams = teamPair(doc);
   const step1 = Boolean(doc?.partyA?.signature && doc?.partyB?.signature);
-  const step2 = teams.length > 0 && teams.every((team) => Boolean(doc?.approvals?.supervisors?.[team]?.signature));
-  const step3 = teams.length > 0 && teams.every((team) => Boolean(doc?.approvals?.chiefs?.[team]?.signature));
+  const step2 = !isStepDenied(doc, 2) && teams.length > 0 && teams.every((team) => Boolean(doc?.approvals?.supervisors?.[team]?.signature));
+  const step3 = !isStepDenied(doc, 3) && teams.length > 0 && teams.every((team) => Boolean(doc?.approvals?.chiefs?.[team]?.signature));
   return { step1, step2, step3 };
 }
 
 function personLabel(person, fallback = '—') {
-  if (!person) return fallback;
-  const rank = person.rank ? `${String(person.rank).replaceAll('_', ' ')} ` : '';
-  return `${rank}${person.warName || person.name || fallback}`.trim();
+  return officerLine(pickIdentity(person || {}, person?.userKey || ''), fallback);
 }
 
 function teamSideLabel(doc, team) {
@@ -1285,26 +1793,30 @@ function stepPeopleStatus(doc) {
 
   const step2 = teams.map((team) => {
     const approval = doc?.approvals?.supervisors?.[team];
-    const missingCadastro = Number(doc?.approvalAvailability?.supervisor?.[team] || 0) === 0 && !approval?.signature;
+    const missingCadastro = Number(doc?.approvalAvailability?.supervisor?.[team] || 0) === 0 && !approval?.signature && !isApprovalDenied(approval);
     return {
       role: 'Supervisor',
       name: approval?.warName || approval?.name || `Supervisor da Equipe ${team}`,
       teamLabel: teamSideLabel(doc, team),
       done: Boolean(approval?.signature),
+      denied: isApprovalDenied(approval),
       signedBy: approval?.signature ? personLabel(approval) : '',
+      deniedBy: isApprovalDenied(approval) ? personLabel(approval) : '',
       missingCadastro
     };
   });
 
   const step3 = teams.map((team) => {
     const approval = doc?.approvals?.chiefs?.[team];
-    const missingCadastro = Number(doc?.approvalAvailability?.['operations-chief']?.[team] || 0) === 0 && !approval?.signature;
+    const missingCadastro = Number(doc?.approvalAvailability?.['operations-chief']?.[team] || 0) === 0 && !approval?.signature && !isApprovalDenied(approval);
     return {
       role: 'Chefe de Operações',
       name: approval?.warName || approval?.name || `Chefe de Operações da Equipe ${team}`,
       teamLabel: teamSideLabel(doc, team),
       done: Boolean(approval?.signature),
+      denied: isApprovalDenied(approval),
       signedBy: approval?.signature ? personLabel(approval) : '',
+      deniedBy: isApprovalDenied(approval) ? personLabel(approval) : '',
       missingCadastro
     };
   });
@@ -1314,7 +1826,7 @@ function stepPeopleStatus(doc) {
 
 function formatPendingPeople(people) {
   return people
-    .filter((person) => !person.done)
+    .filter((person) => !person.done && !person.denied)
     .map((person) => {
       if (person.missingCadastro) return `${person.role} ${person.teamLabel} (sem cadastro)`;
       return `${person.role} ${person.name} (${person.teamLabel})`;
@@ -1323,6 +1835,8 @@ function formatPendingPeople(people) {
 }
 
 function pendingDetail(doc) {
+  if (isStepDenied(doc, 2)) return 'Passo 2 indeferido';
+  if (isStepDenied(doc, 3)) return 'Passo 3 indeferido';
   const done = stepCompletion(doc);
   const people = stepPeopleStatus(doc);
   if (!done.step1) {
@@ -1340,16 +1854,48 @@ function pendingDetail(doc) {
   return 'OK · Todos os passos concluídos';
 }
 
+function isDocumentAdminView() {
+  return currentUser?.profile === 'admin';
+}
+
+function publicStepStatus(doc) {
+  const done = stepCompletion(doc);
+  if (doc?.status === 'completed' || (done.step1 && done.step2 && done.step3)) {
+    return 'OK · 3 passos concluídos';
+  }
+  const step2Text = isStepDenied(doc, 2) ? 'indeferido' : done.step2 ? 'concluído' : 'pendente';
+  const step3Text = isStepDenied(doc, 3) ? 'indeferido' : isStepDenied(doc, 2) ? 'não iniciado' : done.step3 ? 'concluído' : 'pendente';
+  return [
+    `Passo 1 ${done.step1 ? 'concluído' : 'pendente'}`,
+    `Passo 2 ${step2Text}`,
+    `Passo 3 ${step3Text}`
+  ].join(' · ');
+}
+
+function viewerStepStatus(doc) {
+  return isDocumentAdminView() ? pendingDetail(doc) : publicStepStatus(doc);
+}
+
+function isOwnPartyBlock(doc, partyKey) {
+  return Boolean(currentUserKey && doc?.[partyKey]?.userKey === currentUserKey);
+}
+
+function isOwnApprovalSlot(role, team) {
+  return userProfile(currentUser) === role && userTeam(currentUser) === normalizeTeam(team);
+}
+
 function appendPersonStatusList(container, people) {
   const list = document.createElement('ul');
   list.className = 'timeline-people';
   people.forEach((person) => {
     const item = document.createElement('li');
-    item.className = person.done ? 'is-done' : 'is-pending';
+    item.className = person.denied ? 'is-denied' : person.done ? 'is-done' : 'is-pending';
     const mark = document.createElement('strong');
-    mark.textContent = person.done ? 'OK' : 'PENDENTE';
+    mark.textContent = person.denied ? 'INDEFERIDO' : person.done ? 'OK' : 'PENDENTE';
     const copy = document.createElement('span');
-    if (person.done) {
+    if (person.denied) {
+      copy.textContent = `${person.role}: ${person.deniedBy || person.name} indeferiu · ${person.teamLabel}`;
+    } else if (person.done) {
       copy.textContent = `${person.role}: ${person.signedBy || person.name} · ${person.teamLabel}`;
     } else if (person.missingCadastro) {
       copy.textContent = `${person.role}: aguardando cadastro · ${person.teamLabel}`;
@@ -1365,31 +1911,34 @@ function appendPersonStatusList(container, people) {
 function renderTimeline(doc) {
   if (!els.docTimeline) return;
   els.docTimeline.replaceChildren();
+  const full = isDocumentAdminView();
   const done = stepCompletion(doc);
   const people = stepPeopleStatus(doc);
   const data = [
-    { n: 1, done: done.step1, title: 'Partes (2 envolvidos)', people: people.step1 },
-    { n: 2, done: done.step2, title: 'Supervisores (2 equipes)', people: people.step2 },
-    { n: 3, done: done.step3, title: 'Chefes de Operações (2 equipes)', people: people.step3 }
+    { n: 1, done: done.step1, denied: false, title: 'Partes (2 envolvidos)', people: people.step1 },
+    { n: 2, done: done.step2, denied: isStepDenied(doc, 2), title: 'Supervisores (2 equipes)', people: people.step2 },
+    { n: 3, done: done.step3, denied: isStepDenied(doc, 3), title: 'Chefes de Operações (2 equipes)', people: people.step3 }
   ];
   data.forEach((step) => {
     const item = document.createElement('article');
-    const isCurrent = (!done.step1 && step.n === 1)
-      || (done.step1 && !done.step2 && step.n === 2)
-      || (done.step1 && done.step2 && !done.step3 && step.n === 3);
-    item.className = `timeline-step ${step.done ? 'is-complete' : 'is-pending'}${isCurrent ? ' is-current' : ''}`;
+    const isCurrent = !step.denied && ((!done.step1 && step.n === 1)
+      || (done.step1 && !done.step2 && !isStepDenied(doc, 2) && step.n === 2)
+      || (done.step1 && done.step2 && !done.step3 && !isStepDenied(doc, 3) && step.n === 3));
+    item.className = `timeline-step ${step.denied ? 'is-denied' : step.done ? 'is-complete' : 'is-pending'}${isCurrent ? ' is-current' : ''}`;
     const icon = document.createElement('span');
     icon.className = 'timeline-check';
-    icon.textContent = step.done ? '✓' : String(step.n);
+    icon.textContent = step.denied ? '✕' : step.done ? '✓' : String(step.n);
     const copy = document.createElement('div');
     const strong = document.createElement('strong');
     strong.textContent = `Passo ${step.n} · ${step.title}`;
     const small = document.createElement('small');
-    small.textContent = step.done
-      ? 'Concluído — os 2 envolvidos assinaram.'
-      : `Pendentes: ${formatPendingPeople(step.people) || 'aguardando'}`;
+    small.textContent = step.denied
+      ? 'Indeferido'
+      : step.done
+        ? (full ? 'Concluído — os 2 envolvidos assinaram.' : 'Concluído')
+        : (full ? `Pendentes: ${formatPendingPeople(step.people) || 'aguardando'}` : 'Aguardando conclusão');
     copy.append(strong, small);
-    appendPersonStatusList(copy, step.people);
+    if (full) appendPersonStatusList(copy, step.people);
     item.append(icon, copy);
     els.docTimeline.appendChild(item);
   });
@@ -1414,7 +1963,7 @@ function renderPartyBlock(doc, partyKey) {
   const block = document.createElement('section');
   block.className = 'troca-sign-block';
   const heading = document.createElement('h3');
-  heading.textContent = `Passo 1 · ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} — ${party.warName || party.name}`;
+  heading.textContent = `Passo 1 · ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} — ${officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name)}`;
   const role = document.createElement('p');
   role.className = 'troca-message-from';
   role.textContent = `${party.name || ''} · Equipe ${party.team || '—'}`;
@@ -1424,7 +1973,7 @@ function renderPartyBlock(doc, partyKey) {
     if (allowed) {
       const canvas = document.createElement('canvas');
       canvas.className = 'troca-signature-canvas';
-      canvas.setAttribute('aria-label', `Assine aqui, ${party.warName || party.name}`);
+      canvas.setAttribute('aria-label', `Assine aqui, ${officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name)}`);
       block.appendChild(canvas);
       const actions = document.createElement('div');
       actions.className = 'troca-message-actions';
@@ -1443,6 +1992,10 @@ function renderPartyBlock(doc, partyKey) {
 }
 
 function canCurrentUserApprove(doc, role, team) {
+  if (isDocDenied(doc)) return false;
+  const key = role === 'supervisor' ? 'supervisors' : 'chiefs';
+  const existing = doc?.approvals?.[key]?.[normalizeTeam(team)];
+  if (existing?.signature || isApprovalDenied(existing)) return false;
   return userProfile(currentUser) === role && userTeam(currentUser) === team && (
     (role === 'supervisor' && doc.status === 'step2-supervisors') ||
     (role === 'operations-chief' && doc.status === 'step3-chiefs')
@@ -1453,19 +2006,30 @@ function renderApprovalGroup(doc, role) {
   const isSupervisor = role === 'supervisor';
   const key = isSupervisor ? 'supervisors' : 'chiefs';
   const step = isSupervisor ? 2 : 3;
+  const full = isDocumentAdminView();
   teamPair(doc).forEach((team) => {
+    if (!full && !isOwnApprovalSlot(role, team)) return;
     const approval = doc?.approvals?.[key]?.[team];
     const block = document.createElement('section');
     block.className = 'troca-sign-block approval-sign-block';
     const heading = document.createElement('h3');
     heading.textContent = `Passo ${step} · ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} — Equipe ${team}`;
     block.appendChild(heading);
-    if (!appendSignedImage(block, approval)) {
+    if (isApprovalDenied(approval) || isStepDenied(doc, step)) {
+      const denied = document.createElement('p');
+      denied.className = 'troca-denied-copy';
+      if (isApprovalDenied(approval)) {
+        denied.textContent = `INDEFERIDO por ${officerLine(pickIdentity(approval, approval.userKey), approval.warName || approval.name)}${approval.denyReason ? ` · Motivo: ${approval.denyReason}` : ''}.`;
+      } else {
+        denied.textContent = `Este passo foi indeferido.`;
+      }
+      block.appendChild(denied);
+    } else if (!appendSignedImage(block, approval)) {
       const availability = Number(doc?.approvalAvailability?.[role]?.[team] || 0);
       if (canCurrentUserApprove(doc, role, team)) {
         const ciente = document.createElement('p');
         ciente.className = 'approval-ciente-copy';
-        ciente.textContent = 'Ao confirmar, você registra ciência desta troca e sua assinatura.';
+        ciente.textContent = 'Após o aceite das duas partes, você pode dar ciência e assinar ou indeferir este passo.';
         const canvas = document.createElement('canvas');
         canvas.className = 'troca-signature-canvas';
         block.append(ciente, canvas);
@@ -1473,6 +2037,7 @@ function renderApprovalGroup(doc, role) {
         actions.className = 'troca-message-actions';
         addAction(actions, 'Limpar', 'close', () => clearSignatureCanvas(canvas));
         addAction(actions, 'Ciente e assinar', 'accept', () => saveApprovalSignature(role, team, canvas));
+        addAction(actions, 'Indeferir', 'remove', () => denyApproval(role, team));
         block.appendChild(actions);
         requestAnimationFrame(() => bindSignaturePad(canvas));
       } else {
@@ -1493,14 +2058,15 @@ function renderDocument(doc) {
   setStatus(els.docStatus);
   els.docMeta.replaceChildren();
   els.docSignAreas.replaceChildren();
+  const full = isDocumentAdminView();
   const rows = [
     ['Dia solicitado', formatDateBr(doc.requestDate)],
     ['Dia da contraproposta', formatDateBr(doc.counterDate)],
     ['Equipes', `Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`],
     ['Solicitante', personLabel(doc.partyA, '—')],
     ['Interessado', personLabel(doc.partyB, '—')],
-    ['Status', doc.status === 'completed' ? 'OK' : 'PENDENTE'],
-    ['Quem está pendente', pendingDetail(doc)]
+    ['Status', doc.status === 'completed' ? 'OK' : isDocDenied(doc) ? 'INDEFERIDO' : 'PENDENTE'],
+    [full ? 'Quem está pendente' : 'Andamento', viewerStepStatus(doc)]
   ];
   rows.forEach(([label, value]) => {
     const item = document.createElement('div');
@@ -1513,10 +2079,12 @@ function renderDocument(doc) {
     els.docMeta.appendChild(item);
   });
   renderTimeline(doc);
-  renderPartyBlock(doc, 'partyB');
-  renderPartyBlock(doc, 'partyA');
+  if (full || isOwnPartyBlock(doc, 'partyB')) renderPartyBlock(doc, 'partyB');
+  if (full || isOwnPartyBlock(doc, 'partyA')) renderPartyBlock(doc, 'partyA');
   renderApprovalGroup(doc, 'supervisor');
   renderApprovalGroup(doc, 'operations-chief');
+  openDocumentCache = doc;
+  if (els.docPdfActions) els.docPdfActions.hidden = doc.status !== 'completed';
 }
 
 function canViewDocument(doc) {
@@ -1638,19 +2206,27 @@ async function saveApprovalSignature(role, team, canvas) {
     if (!doc) throw new Error('Documento não encontrado.');
     if (doc.status !== expectedStatus) throw new Error('Esta etapa ainda não está liberada ou já foi concluída.');
     if (!teamPair(doc).includes(normalizedTeam)) throw new Error('Equipe inválida para esta ciência.');
+    if (isDocDenied(doc)) throw new Error('Esta troca já foi indeferida.');
     if (doc.approvals?.[approvalKey]?.[normalizedTeam]?.signature) {
       throw new Error('A ciência desta equipe já foi registrada.');
+    }
+    if (isApprovalDenied(doc.approvals?.[approvalKey]?.[normalizedTeam])) {
+      throw new Error('Esta equipe já indeferiu este passo.');
     }
 
     const signature = exportSignature(canvas);
     const now = Date.now();
+    const me = currentUserIdentity();
     const approvalRecord = {
       userKey: currentUserKey,
-      name: currentUser.name || userDisplayName(currentUser),
-      warName: currentUser.warName || '',
-      rank: currentUser.rank || '',
+      name: me.name || currentUser.name || userDisplayName(currentUser),
+      warName: me.warName || currentUser.warName || '',
+      rank: me.rank || currentUser.rank || '',
+      re: me.re || '',
+      reMasked: me.reMasked || '',
       team: normalizedTeam,
       profile: role,
+      decision: 'approved',
       ciente: true,
       signature,
       signedAt: now
@@ -1696,23 +2272,10 @@ async function saveApprovalSignature(role, team, canvas) {
       await dispatchApproverMessages(refreshed, 'operations-chief');
     } else if (allDone && !isSupervisor) {
       await closeMessagesForRequest(refreshed.requestId);
-      const noticeWrites = {};
-      [refreshed.partyA, refreshed.partyB].forEach((party) => {
-        if (!party?.userKey) return;
-        const noticeId = push(ref(database, `${TROCAS_INBOX_PATH}/${party.userKey}`)).key;
-        noticeWrites[`${TROCAS_INBOX_PATH}/${party.userKey}/${noticeId}`] = {
-          kind: 'completed-notice',
-          requestId: refreshed.requestId,
-          documentId: openDocumentId,
-          requestDate: refreshed.requestDate,
-          counterDate: refreshed.counterDate,
-          noticeText: 'Passos 1, 2 e 3 concluídos. Status da troca: OK. O acompanhamento permanece até as datas de cumprimento.',
-          status: 'pending',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        };
+      await notifyInvolvedUsers(refreshed, {
+        kind: 'completed-notice',
+        noticeText: 'Passos 1, 2 e 3 concluídos. Status da troca: OK. Você já pode ver ou baixar o PDF.'
       });
-      if (Object.keys(noticeWrites).length) await update(ref(database), noticeWrites);
     }
     await upsertPartyTracking(refreshed);
     renderDocument(refreshed);
@@ -1723,11 +2286,136 @@ async function saveApprovalSignature(role, team, canvas) {
       ? 'Passo 3 concluído. Todos os passos estão ticados e o status é OK.'
       : isSupervisor && refreshed.status === 'step3-chiefs'
         ? 'Passo 2 concluído. Chefes de Operações das duas equipes receberam a solicitação.'
-        : `Ciência registrada. ${pendingDetail(refreshed)}`, 'success');
+        : `Ciência registrada. ${viewerStepStatus(refreshed)}`, 'success');
   } catch (error) {
     console.error(error);
     setStatus(els.docStatus, error.message || 'Não foi possível registrar a ciência.', 'error');
   }
+}
+
+async function involvedUserKeys(doc) {
+  const keys = new Set([doc?.partyA?.userKey, doc?.partyB?.userKey].filter(Boolean));
+  Object.values(doc?.approvals?.supervisors || {}).forEach((item) => {
+    if (item?.userKey) keys.add(item.userKey);
+  });
+  Object.values(doc?.approvals?.chiefs || {}).forEach((item) => {
+    if (item?.userKey) keys.add(item.userKey);
+  });
+  try {
+    const teams = teamPair(doc);
+    const [supervisors, chiefs] = await Promise.all([
+      findApprovers('supervisor', teams),
+      findApprovers('operations-chief', teams)
+    ]);
+    supervisors.forEach((item) => keys.add(item.userKey));
+    chiefs.forEach((item) => keys.add(item.userKey));
+  } catch (error) {
+    console.warn('[CivilOff] envolvidos da troca:', error);
+  }
+  return [...keys];
+}
+
+async function notifyInvolvedUsers(doc, { kind, noticeText, extra = {} }) {
+  const keys = await involvedUserKeys(doc);
+  const writes = {};
+  keys.forEach((userKey) => {
+    pushInboxNotice(writes, userKey, {
+      kind,
+      requestId: doc.requestId,
+      documentId: doc.requestId || openDocumentId,
+      requestDate: doc.requestDate,
+      counterDate: doc.counterDate,
+      noticeText,
+      ...extra
+    });
+  });
+  if (Object.keys(writes).length) await update(ref(database), writes);
+}
+
+async function denyApproval(role, team) {
+  if (!openDocumentId || !currentUserKey) return;
+  const normalizedTeam = normalizeTeam(team);
+  const isSupervisor = role === 'supervisor';
+  const approvalKey = isSupervisor ? 'supervisors' : 'chiefs';
+  const step = isSupervisor ? 2 : 3;
+  const expectedStatus = isSupervisor ? 'step2-supervisors' : 'step3-chiefs';
+  if (userProfile(currentUser) !== role || userTeam(currentUser) !== normalizedTeam) {
+    setStatus(els.docStatus, 'Seu perfil/equipe não permite indeferir este passo.', 'error');
+    return;
+  }
+  if (!window.confirm(`Indeferir esta troca no Passo ${step}? O andamento será encerrado neste passo.`)) {
+    return;
+  }
+  const reason = window.prompt('Informe o motivo do indeferimento (opcional):') ?? '';
+  setStatus(els.docStatus, `Registrando indeferimento do Passo ${step}…`, 'loading');
+  try {
+    const docRef = ref(database, `${TROCAS_DOCS_PATH}/${openDocumentId}`);
+    const snap = await get(docRef);
+    const doc = snap.val();
+    if (!doc) throw new Error('Documento não encontrado.');
+    if (doc.status !== expectedStatus) throw new Error('Esta etapa ainda não está liberada ou já foi encerrada.');
+    if (isDocDenied(doc)) throw new Error('Esta troca já foi indeferida.');
+    if (doc.approvals?.[approvalKey]?.[normalizedTeam]?.signature || isApprovalDenied(doc.approvals?.[approvalKey]?.[normalizedTeam])) {
+      throw new Error('Este passo já foi decidido pela sua equipe.');
+    }
+
+    const now = Date.now();
+    const me = currentUserIdentity();
+    const deniedStatus = isSupervisor ? 'step2-denied' : 'step3-denied';
+    const approvalRecord = {
+      userKey: currentUserKey,
+      name: me.name || currentUser.name || userDisplayName(currentUser),
+      warName: me.warName || currentUser.warName || '',
+      rank: me.rank || currentUser.rank || '',
+      re: me.re || '',
+      reMasked: me.reMasked || '',
+      team: normalizedTeam,
+      profile: role,
+      decision: 'denied',
+      status: 'denied',
+      ciente: false,
+      denyReason: String(reason || '').trim(),
+      deniedAt: now
+    };
+    await update(ref(database), {
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/approvals/${approvalKey}/${normalizedTeam}`]: approvalRecord,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/steps/step${step}`]: {
+        ...(doc.steps?.[`step${step}`] || {}),
+        status: 'denied',
+        deniedAt: now,
+        deniedBy: currentUserKey,
+        deniedByName: me.warName || me.name || '',
+        denyReason: String(reason || '').trim()
+      },
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/status`]: deniedStatus,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/overallStatus`]: 'INDEFERIDO',
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/pendingStep`]: null,
+      [`${TROCAS_DOCS_PATH}/${openDocumentId}/updatedAt`]: now,
+      [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/status`]: deniedStatus,
+      [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/pendingStep`]: null,
+      [`${TROCAS_REQUESTS_PATH}/${doc.requestId}/updatedAt`]: serverTimestamp()
+    });
+
+    await closeApprovalMessagesForRole(openDocumentId, role);
+    const refreshed = (await get(docRef)).val() || doc;
+    await upsertPartyTracking(refreshed);
+    await notifyInvolvedUsers(refreshed, {
+      kind: 'denied-notice',
+      noticeText: `${officerLine(me)} indeferiu o Passo ${step}${approvalRecord.denyReason ? ` · Motivo: ${approvalRecord.denyReason}` : ''}.`,
+      extra: { deniedStep: step }
+    });
+    renderDocument(refreshed);
+    setStatus(els.docStatus, `Passo ${step} indeferido. A troca foi encerrada neste passo.`, 'success');
+  } catch (error) {
+    console.error(error);
+    setStatus(els.docStatus, error.message || 'Não foi possível indeferir este passo.', 'error');
+  }
+}
+
+async function closeApprovalMessagesForRole(documentId, approvalRole) {
+  await removeMessagesByPredicate((message) => (
+    message?.documentId === documentId && message?.kind === 'approval-request' && message?.approvalRole === approvalRole
+  ));
 }
 
 function loadJsPdf() {
@@ -1744,41 +2432,93 @@ function loadJsPdf() {
   return jsPdfLoader;
 }
 
+function canDownloadCompletedPdf(doc) {
+  return Boolean(doc && doc.status === 'completed' && canViewDocument(doc));
+}
+
+async function loadDocumentById(documentId) {
+  if (!documentId) return null;
+  if (openDocumentCache && (openDocumentCache.requestId === documentId || openDocumentCache.id === documentId)) {
+    return openDocumentCache;
+  }
+  if (myDocsCache[documentId]) return { id: documentId, ...myDocsCache[documentId] };
+  if (adminDocsCache[documentId]) return { id: documentId, ...adminDocsCache[documentId] };
+  const snapshot = await get(ref(database, `${TROCAS_DOCS_PATH}/${documentId}`));
+  const doc = snapshot.val();
+  return doc ? { id: documentId, ...doc } : null;
+}
+
+async function buildDocumentPdf(doc) {
+  const JsPDF = await loadJsPdf();
+  const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
+  const margin = 16;
+  let y = 20;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(16);
+  pdf.text('Termo de troca de serviço — CivilOff', margin, y);
+  y += 9;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(10);
+  const lines = [
+    `Status: ${doc.status === 'completed' ? 'OK — 3 passos concluídos' : isDocDenied(doc) ? `INDEFERIDO — ${publicStepStatus(doc)}` : pendingDetail(doc)}`,
+    `Dia solicitado: ${formatDateBr(doc.requestDate)}`,
+    `Dia da contraproposta: ${formatDateBr(doc.counterDate)}`,
+    `Solicitante: ${officerLine(requesterIdentity(doc), doc.partyA?.name || '—')} — Equipe ${doc.fromTeam || '—'}`,
+    `Interessado: ${officerLine(proposerIdentity(doc), doc.partyB?.name || '—')} — Equipe ${doc.interestedTeam || '—'}`
+  ];
+  lines.forEach((line) => { pdf.text(line, margin, y); y += 6; });
+  y += 4;
+  const addSignature = (label, signer) => {
+    pdf.setFont('helvetica', 'bold');
+    const denied = isApprovalDenied(signer);
+    pdf.text(`${label}: ${denied ? `INDEFERIDO — ${officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || '—')}` : officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || 'Pendente')}`, margin, y);
+    y += 4;
+    if (signer?.signature) {
+      try { pdf.addImage(signer.signature, 'JPEG', margin, y, 74, 28); y += 32; } catch { y += 6; }
+    } else { y += 5; }
+    if (y > 260) { pdf.addPage(); y = 20; }
+  };
+  addSignature('Passo 1 — Interessado', doc.partyB);
+  addSignature('Passo 1 — Solicitante', doc.partyA);
+  teamPair(doc).forEach((team) => addSignature(`Passo 2 — Supervisor Equipe ${team}`, doc.approvals?.supervisors?.[team]));
+  teamPair(doc).forEach((team) => addSignature(`Passo 3 — Chefe de Operações Equipe ${team}`, doc.approvals?.chiefs?.[team]));
+  return pdf;
+}
+
+async function handleViewPdf(documentId) {
+  try {
+    const doc = await loadDocumentById(documentId);
+    if (!canDownloadCompletedPdf(doc)) {
+      window.alert('O PDF fica disponível para os envolvidos após a conclusão dos 3 passos.');
+      return;
+    }
+    const pdf = await buildDocumentPdf(doc);
+    const url = URL.createObjectURL(pdf.output('blob'));
+    window.open(url, '_blank', 'noopener');
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || 'Não foi possível abrir o PDF.');
+  }
+}
+
+async function handleDownloadPdf(documentId) {
+  try {
+    const doc = typeof documentId === 'string' ? await loadDocumentById(documentId) : documentId;
+    await downloadDocumentPdf(doc);
+  } catch (error) {
+    console.error(error);
+    window.alert(error.message || 'Não foi possível baixar o PDF.');
+  }
+}
+
 async function downloadDocumentPdf(doc) {
   if (!doc) return;
+  if (!canDownloadCompletedPdf(doc)) {
+    window.alert('O PDF fica disponível para os envolvidos após a conclusão dos 3 passos.');
+    return;
+  }
   try {
-    const JsPDF = await loadJsPdf();
-    const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
-    const margin = 16;
-    let y = 20;
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(16);
-    pdf.text('Termo de troca de serviço — CivilOff', margin, y);
-    y += 9;
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(10);
-    const lines = [
-      `Status: ${doc.status === 'completed' ? 'OK — 3 passos concluídos' : pendingDetail(doc)}`,
-      `Dia solicitado: ${formatDateBr(doc.requestDate)}`,
-      `Dia da contraproposta: ${formatDateBr(doc.counterDate)}`,
-      `Solicitante: ${doc.partyA?.name || '—'} — Equipe ${doc.fromTeam || '—'}`,
-      `Interessado: ${doc.partyB?.name || '—'} — Equipe ${doc.interestedTeam || '—'}`
-    ];
-    lines.forEach((line) => { pdf.text(line, margin, y); y += 6; });
-    y += 4;
-    const addSignature = (label, signer) => {
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(`${label}: ${signer?.name || signer?.warName || 'Pendente'}`, margin, y);
-      y += 4;
-      if (signer?.signature) {
-        try { pdf.addImage(signer.signature, 'JPEG', margin, y, 74, 28); y += 32; } catch { y += 6; }
-      } else { y += 5; }
-      if (y > 260) { pdf.addPage(); y = 20; }
-    };
-    addSignature('Passo 1 — Interessado', doc.partyB);
-    addSignature('Passo 1 — Solicitante', doc.partyA);
-    teamPair(doc).forEach((team) => addSignature(`Passo 2 — Supervisor Equipe ${team}`, doc.approvals?.supervisors?.[team]));
-    teamPair(doc).forEach((team) => addSignature(`Passo 3 — Chefe de Operações Equipe ${team}`, doc.approvals?.chiefs?.[team]));
+    const pdf = await buildDocumentPdf(doc);
     pdf.save(`troca_${String(doc.requestDate || '').replace(/-/g, '')}_${String(doc.counterDate || '').replace(/-/g, '')}.pdf`);
   } catch (error) {
     console.error(error);
@@ -1804,34 +2544,83 @@ function selectedTargetTeams() {
   return Array.from(els.teamChoices?.querySelectorAll('input[name="targetTeam"]:checked') || []).map((input) => input.value);
 }
 
-function refreshTeamChoices() {
+function refreshTeamChoices(selectedTeams = []) {
   const mine = userTeam(currentUser);
+  const selected = new Set((selectedTeams || []).map(normalizeTeam).filter(Boolean));
   els.teamChoices?.querySelectorAll('input[name="targetTeam"]').forEach((input) => {
-    input.checked = false;
     input.disabled = input.value === mine;
+    input.checked = selected.has(input.value) && !input.disabled;
     input.closest('label')?.classList.toggle('is-disabled', input.disabled);
   });
 }
 
-function openRequestDialog() {
-  if (!els.requestDialog) return;
+function resetRequestDialogMode() {
+  editingRequestId = '';
+  if (els.requestTitle) els.requestTitle.textContent = 'Solicitar troca';
+  if (els.requestIntro) {
+    els.requestIntro.textContent = 'Escolha um dos seus dias de serviço e uma ou mais equipes que poderão receber o pedido.';
+  }
+  if (els.requestSubmit) els.requestSubmit.textContent = 'Enviar pedido';
+}
+
+function prepareRequestDialog({ requestId = '', requestDate = '', targetTeams = [] } = {}) {
   const mine = userTeam(currentUser);
   if (userProfile(currentUser) !== 'dispatcher') {
     window.alert('Somente Despachadores podem solicitar troca. Supervisores e Chefes de Operações atuam nas etapas de ciência.');
-    return;
+    return false;
   }
   if (!mine) {
     window.alert('Seu usuário ainda não possui equipe A–E. Peça ao administrador para vincular sua equipe.');
+    return false;
+  }
+  editingRequestId = requestId || '';
+  setStatus(els.requestStatus);
+  if (els.requestDate) els.requestDate.value = requestDate || '';
+  if (requestDate) {
+    const selected = fromLocalISO(requestDate);
+    requestVisibleMonth = selected
+      ? new Date(selected.getFullYear(), selected.getMonth(), 1, 12)
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+    if (els.requestSelectedDate) {
+      els.requestSelectedDate.textContent = `Selecionado: ${formatDateBr(requestDate)} · Equipe ${mine} em serviço.`;
+    }
+  } else {
+    requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+    if (els.requestSelectedDate) {
+      els.requestSelectedDate.textContent = `Selecione um dia iluminado. Somente a Equipe ${mine} em serviço.`;
+    }
+  }
+  if (editingRequestId) {
+    if (els.requestTitle) els.requestTitle.textContent = 'Editar pedido de troca';
+    if (els.requestIntro) {
+      els.requestIntro.textContent = 'Altere o dia ou as equipes de destino. Isso só é possível enquanto você não aceitar nenhuma contraproposta.';
+    }
+    if (els.requestSubmit) els.requestSubmit.textContent = 'Salvar alterações';
+  } else {
+    resetRequestDialogMode();
+  }
+  refreshTeamChoices(targetTeams);
+  renderRequestCalendar();
+  return true;
+}
+
+function openRequestDialog() {
+  if (!els.requestDialog) return;
+  if (!prepareRequestDialog()) return;
+  els.requestDialog.showModal();
+}
+
+function openRequestDialogForEdit(request) {
+  if (!els.requestDialog) return;
+  if (!isRequestStillEditable(request)) {
+    window.alert('Não é possível editar depois de aceitar uma contraproposta. Somente o administrador pode excluir.');
     return;
   }
-  setStatus(els.requestStatus);
-  if (els.requestDate) els.requestDate.value = '';
-  if (els.requestSelectedDate) {
-    els.requestSelectedDate.textContent = `Selecione um dia iluminado. Somente a Equipe ${mine} em serviço.`;
-  }
-  requestVisibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
-  refreshTeamChoices();
-  renderRequestCalendar();
+  if (!prepareRequestDialog({
+    requestId: request.id || request.requestId,
+    requestDate: request.requestDate || '',
+    targetTeams: request.targetTeams || []
+  })) return;
   els.requestDialog.showModal();
 }
 
@@ -1867,17 +2656,20 @@ async function handleRequestSubmit(event) {
     setStatus(els.requestStatus, 'Escolha uma ou mais equipes de destino.', 'error');
     return;
   }
-  setStatus(els.requestStatus, 'Enviando solicitação…', 'loading');
+  setStatus(els.requestStatus, editingRequestId ? 'Salvando alterações…' : 'Enviando solicitação…', 'loading');
   try {
-    const result = await createTrocaRequest(requestDate, teams);
-    setStatus(els.requestStatus, `Pedido enviado para ${result.recipientCount} Despachador(es) de ${targetTeamText(result.teams)}.`, 'success');
+    const result = editingRequestId
+      ? await updateOpenTrocaRequest(editingRequestId, requestDate, teams)
+      : await createTrocaRequest(requestDate, teams);
+    const prefix = editingRequestId ? 'Pedido atualizado' : 'Pedido enviado';
+    setStatus(els.requestStatus, `${prefix} para ${result.recipientCount} Despachador(es) de ${targetTeamText(result.teams)}.`, 'success');
     window.setTimeout(() => {
       els.requestDialog?.close();
       setStatus(els.requestStatus);
     }, 1200);
   } catch (error) {
     console.error(error);
-    setStatus(els.requestStatus, error.message || 'Não foi possível enviar a solicitação.', 'error');
+    setStatus(els.requestStatus, error.message || (editingRequestId ? 'Não foi possível salvar as alterações.' : 'Não foi possível enviar a solicitação.'), 'error');
   }
 }
 
@@ -1885,8 +2677,14 @@ function bindEvents() {
   els.trocaButton?.addEventListener('click', openRequestDialog);
   els.inboxButton?.addEventListener('click', openInboxDialog);
   els.cancelRequest?.addEventListener('click', () => els.requestDialog?.close());
+  els.requestDialog?.addEventListener('close', () => {
+    resetRequestDialogMode();
+    setStatus(els.requestStatus);
+  });
   els.closeInbox?.addEventListener('click', () => els.inboxDialog?.close());
   els.closeDoc?.addEventListener('click', () => els.docDialog?.close());
+  els.viewPdf?.addEventListener('click', () => handleViewPdf(openDocumentId || openDocumentCache?.requestId || openDocumentCache?.id));
+  els.downloadPdf?.addEventListener('click', () => handleDownloadPdf(openDocumentId || openDocumentCache?.requestId || openDocumentCache?.id));
   els.cancelProposal?.addEventListener('click', () => {
     activeProposalMessage = null;
     els.proposalDialog?.close();
@@ -1917,6 +2715,7 @@ document.addEventListener('civiloff:authchange', (event) => {
   currentUserKey = detail.userKey || '';
   currentUser = detail.user || null;
   updateVisibility();
+  subscribeUsersDirectory();
   subscribeInbox();
   subscribeAdminRequests();
 });

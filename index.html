@@ -33,7 +33,7 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=911">
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -240,8 +240,8 @@
       <div class="dialog-icon troca-dialog-icon" aria-hidden="true">
         <img src="icons/troca.png" alt="" width="40" height="40" decoding="async">
       </div>
-      <h2>Solicitar troca</h2>
-      <p>Escolha um dos seus dias de serviço e uma ou mais equipes que poderão receber o pedido.</p>
+      <h2 id="trocaRequestTitle">Solicitar troca</h2>
+      <p id="trocaRequestIntro">Escolha um dos seus dias de serviço e uma ou mais equipes que poderão receber o pedido.</p>
 
       <section class="proposal-calendar-shell" aria-labelledby="requestCalendarTitle">
         <header class="proposal-calendar-header">
@@ -274,7 +274,7 @@
       <p id="trocaRequestStatus" class="form-status" role="status" aria-live="polite" hidden></p>
       <div class="dialog-actions">
         <button id="cancelTrocaRequest" type="button" class="dialog-cancel">Cancelar</button>
-        <button type="submit" class="dialog-confirm access-confirm">Enviar pedido</button>
+        <button id="trocaRequestSubmit" type="submit" class="dialog-confirm access-confirm">Enviar pedido</button>
       </div>
     </form>
   </dialog>
@@ -553,6 +553,10 @@
       <div id="trocaDocMeta" class="troca-doc-meta"></div>
       <div id="trocaTimeline" class="troca-timeline" aria-label="Andamento da troca"></div>
       <div id="trocaDocSignAreas" class="troca-doc-sign-areas"></div>
+      <div id="trocaDocPdfActions" class="troca-message-actions troca-doc-pdf-actions" hidden>
+        <button id="viewTrocaPdf" type="button" class="troca-action accept">Ver PDF</button>
+        <button id="downloadTrocaPdf" type="button" class="troca-action">Baixar PDF</button>
+      </div>
       <p id="trocaDocStatus" class="form-status" role="status" aria-live="polite" hidden></p>
     </div>
   </dialog>
@@ -561,10 +565,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="email-config.js?v=907"></script>
-  <script type="module" src="firebase-devices.js?v=907"></script>
-  <script type="module" src="access-admin.js?v=907"></script>
-  <script type="module" src="firebase-troca.js?v=907"></script>
-  <script src="app.js?v=907" defer></script>
+  <script src="email-config.js?v=911"></script>
+  <script type="module" src="firebase-devices.js?v=911"></script>
+  <script type="module" src="access-admin.js?v=911"></script>
+  <script type="module" src="firebase-troca.js?v=911"></script>
+  <script src="app.js?v=911" defer></script>
 </body>
 </html>
