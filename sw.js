@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.23-lotacao-dupla';
+const CACHE_NAME = 'civiloff-v9.24-aprovacao-cpa';
 const APP_SHELL = [
   './',
   './index.html',

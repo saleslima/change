@@ -543,6 +543,43 @@ function teamPair(doc) {
   return [...new Set([normalizeTeam(doc?.fromTeam), normalizeTeam(doc?.interestedTeam)].filter(Boolean))];
 }
 
+function partySides(doc) {
+  const sides = [
+    {
+      team: normalizeTeam(doc?.fromTeam || doc?.partyA?.team),
+      cpa: normalizeCpa(doc?.partyA?.cpa || doc?.fromCpa)
+    },
+    {
+      team: normalizeTeam(doc?.interestedTeam || doc?.partyB?.team),
+      cpa: normalizeCpa(doc?.partyB?.cpa || doc?.interestedCpa)
+    }
+  ];
+  const seen = new Set();
+  return sides.filter((side) => {
+    if (!side.team || seen.has(side.team)) return false;
+    seen.add(side.team);
+    return true;
+  });
+}
+
+function sideForTeam(doc, team) {
+  const normalized = normalizeTeam(team);
+  return partySides(doc).find((side) => side.team === normalized) || { team: normalized, cpa: '' };
+}
+
+function canApproveDocSide(doc, role, team) {
+  if (userProfile(currentUser) !== role) return false;
+  const side = sideForTeam(doc, team);
+  if (role === 'supervisor') {
+    const myCpa = normalizeCpa(currentUser?.cpa);
+    return Boolean(myCpa && side.cpa && myCpa === side.cpa);
+  }
+  if (role === 'operations-chief') {
+    return userTeam(currentUser) === side.team;
+  }
+  return false;
+}
+
 function updateBadge(count) {
   const value = Number(count) || 0;
   if (els.inboxBadge) {
@@ -573,9 +610,15 @@ function isInvolvedInDoc(doc) {
   if ([doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey)) return true;
   const approvals = [...Object.values(doc.approvals?.supervisors || {}), ...Object.values(doc.approvals?.chiefs || {})];
   if (approvals.some((item) => item?.userKey === currentUserKey)) return true;
-  const team = userTeam(currentUser);
   const profile = userProfile(currentUser);
-  return teamPair(doc).includes(team) && ['supervisor', 'operations-chief'].includes(profile);
+  if (profile === 'supervisor') {
+    const myCpa = normalizeCpa(currentUser?.cpa);
+    return Boolean(myCpa && partySides(doc).some((side) => side.cpa === myCpa));
+  }
+  if (profile === 'operations-chief') {
+    return teamPair(doc).includes(userTeam(currentUser));
+  }
+  return false;
 }
 
 function isTrocaVigenteForMe(doc) {
@@ -793,8 +836,8 @@ function statusStepText(status, requestOrDoc = {}) {
   if (status === 'step2-denied') return 'INDEFERIDO · Passo 2 — supervisores';
   if (status === 'step3-denied') return 'INDEFERIDO · Passo 3 — chefes de operações';
   if (status === 'step1-requester') return 'PENDENTE · Passo 1 — assinatura do solicitante';
-  if (status === 'step2-supervisors') return 'PENDENTE · Passo 2 — ciência e assinatura dos supervisores';
-  if (status === 'step3-chiefs') return 'PENDENTE · Passo 3 — ciência e assinatura dos chefes de operações';
+  if (status === 'step2-supervisors') return 'PENDENTE · Passo 2 — ciência dos supervisores das CPAs envolvidas';
+  if (status === 'step3-chiefs') return 'PENDENTE · Passo 3 — ciência dos chefes de operações das equipes';
   if (status === 'selected') return 'PENDENTE · Preparando documento';
   if (status === 'open') return 'Pedido aberto para propostas';
   return requestOrDoc.pendingStep ? `PENDENTE · Passo ${requestOrDoc.pendingStep}` : 'PENDENTE';
@@ -901,7 +944,9 @@ function renderInboxList() {
       const roleText = message.approvalRole === 'supervisor' ? 'Supervisor' : 'Chefe de Operações';
       const step = message.approvalRole === 'supervisor' ? 2 : 3;
       title.textContent = `Passo ${step} · Ciente ou indeferir · ${roleText}`;
-      meta.textContent = `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Abra o documento para dar ciência e assinar ou indeferir pela Equipe ${message.approvalTeam || '—'}.`;
+      meta.textContent = message.approvalRole === 'supervisor'
+        ? `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Ciência do supervisor da CPA ${cpaDisplay(message.approvalCpa) || 'envolvida'} (lado Equipe ${message.approvalTeam || '—'}).`
+        : `Troca das Equipes ${message.fromTeam || '—'} e ${message.interestedTeam || '—'}. Ciência do Chefe de Operações da Equipe ${message.approvalTeam || '—'}.`;
       detail.textContent = [
         `${formatDateBr(message.requestDate)} ↔ ${formatDateBr(message.counterDate)}`,
         bothDutiesDetail(message)
@@ -1274,7 +1319,39 @@ async function findApprovers(profile, teams) {
   const wanted = new Set(teams.map(normalizeTeam).filter(Boolean));
   return Object.entries(users)
     .filter(([, user]) => user && user.active !== false && userProfile(user) === profile && wanted.has(userTeam(user)))
-    .map(([userKey, user]) => ({ userKey, name: user.name || 'Usuário', warName: user.warName || '', team: userTeam(user), rank: user.rank || '' }));
+    .map(([userKey, user]) => ({ userKey, name: user.name || 'Usuário', warName: user.warName || '', team: userTeam(user), rank: user.rank || '', cpa: normalizeCpa(user.cpa) }));
+}
+
+async function findApproversForDoc(profile, doc) {
+  const users = await allUsers();
+  const sides = partySides(doc);
+  const list = [];
+  const seen = new Set();
+  sides.forEach((side) => {
+    Object.entries(users).forEach(([userKey, user]) => {
+      if (!user || user.active === false) return;
+      if (userProfile(user) !== profile) return;
+      if (profile === 'supervisor') {
+        if (!side.cpa || normalizeCpa(user.cpa) !== side.cpa) return;
+      } else if (profile === 'operations-chief') {
+        if (userTeam(user) !== side.team) return;
+      } else {
+        return;
+      }
+      const key = `${userKey}:${side.team}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      list.push({
+        userKey,
+        name: user.name || 'Usuário',
+        warName: user.warName || '',
+        team: side.team,
+        cpa: side.cpa || normalizeCpa(user.cpa) || '',
+        rank: user.rank || ''
+      });
+    });
+  });
+  return list;
 }
 
 async function createTrocaRequest(requestDate, targetTeams, funcao = {}) {
@@ -2162,22 +2239,30 @@ function deterministicMessageId(documentId, role, team, userKey) {
 
 async function dispatchApproverMessages(doc, role) {
   const teams = teamPair(doc);
-  const approvers = await findApprovers(role, teams);
+  const approvers = await findApproversForDoc(role, doc);
   const writes = {};
   const counts = Object.fromEntries(teams.map((team) => [team, 0]));
   approvers.forEach((approver) => {
     counts[approver.team] = (counts[approver.team] || 0) + 1;
     const messageId = deterministicMessageId(doc.requestId, role, approver.team, approver.userKey);
+    const side = sideForTeam(doc, approver.team);
     writes[`${TROCAS_INBOX_PATH}/${approver.userKey}/${messageId}`] = {
       kind: 'approval-request',
       approvalRole: role,
       approvalTeam: approver.team,
+      approvalCpa: side.cpa || approver.cpa || '',
       requestId: doc.requestId,
       documentId: doc.requestId,
       requestDate: doc.requestDate,
       counterDate: doc.counterDate,
       fromTeam: doc.fromTeam,
       interestedTeam: doc.interestedTeam,
+      fromRoles: doc.partyA?.roles || doc.fromRoles || [],
+      fromBtl: doc.partyA?.btl || doc.fromBtl || '',
+      fromCpa: doc.partyA?.cpa || doc.fromCpa || '',
+      interestedRoles: doc.partyB?.roles || doc.interestedRoles || [],
+      interestedBtl: doc.partyB?.btl || doc.interestedBtl || '',
+      interestedCpa: doc.partyB?.cpa || doc.interestedCpa || '',
       status: 'pending',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -2434,11 +2519,12 @@ function stepPeopleStatus(doc) {
 
   const step2 = teams.map((team) => {
     const approval = doc?.approvals?.supervisors?.[team];
+    const side = sideForTeam(doc, team);
     const missingCadastro = Number(doc?.approvalAvailability?.supervisor?.[team] || 0) === 0 && !approval?.signature && !isApprovalDenied(approval);
     return {
       role: 'Supervisor',
-      name: approval?.warName || approval?.name || `Supervisor da Equipe ${team}`,
-      teamLabel: teamSideLabel(doc, team),
+      name: approval?.warName || approval?.name || (side.cpa ? `Supervisor CPA ${cpaDisplay(side.cpa)}` : `Supervisor da Equipe ${team}`),
+      teamLabel: side.cpa ? `CPA ${cpaDisplay(side.cpa)} · Equipe ${team}` : teamSideLabel(doc, team),
       done: Boolean(approval?.signature),
       denied: isApprovalDenied(approval),
       signedBy: approval?.signature ? personLabel(approval) : '',
@@ -2521,8 +2607,8 @@ function isOwnPartyBlock(doc, partyKey) {
   return Boolean(currentUserKey && doc?.[partyKey]?.userKey === currentUserKey);
 }
 
-function isOwnApprovalSlot(role, team) {
-  return userProfile(currentUser) === role && userTeam(currentUser) === normalizeTeam(team);
+function isOwnApprovalSlot(role, team, doc) {
+  return canApproveDocSide(doc, role, team);
 }
 
 function appendPersonStatusList(container, people) {
@@ -2557,8 +2643,8 @@ function renderTimeline(doc) {
   const people = stepPeopleStatus(doc);
   const data = [
     { n: 1, done: done.step1, denied: false, title: 'Partes (2 envolvidos)', people: people.step1 },
-    { n: 2, done: done.step2, denied: isStepDenied(doc, 2), title: 'Supervisores (2 equipes)', people: people.step2 },
-    { n: 3, done: done.step3, denied: isStepDenied(doc, 3), title: 'Chefes de Operações (2 equipes)', people: people.step3 }
+    { n: 2, done: done.step2, denied: isStepDenied(doc, 2), title: 'Supervisores (CPAs envolvidas)', people: people.step2 },
+    { n: 3, done: done.step3, denied: isStepDenied(doc, 3), title: 'Chefes de Operações (equipes)', people: people.step3 }
   ];
   data.forEach((step) => {
     const item = document.createElement('article');
@@ -2642,10 +2728,11 @@ function canCurrentUserApprove(doc, role, team) {
   const key = role === 'supervisor' ? 'supervisors' : 'chiefs';
   const existing = doc?.approvals?.[key]?.[normalizeTeam(team)];
   if (existing?.signature || isApprovalDenied(existing)) return false;
-  return userProfile(currentUser) === role && userTeam(currentUser) === team && (
-    (role === 'supervisor' && doc.status === 'step2-supervisors') ||
-    (role === 'operations-chief' && doc.status === 'step3-chiefs')
+  const statusOk = (
+    (role === 'supervisor' && doc.status === 'step2-supervisors')
+    || (role === 'operations-chief' && doc.status === 'step3-chiefs')
   );
+  return statusOk && canApproveDocSide(doc, role, team);
 }
 
 function renderApprovalGroup(doc, role) {
@@ -2654,12 +2741,15 @@ function renderApprovalGroup(doc, role) {
   const step = isSupervisor ? 2 : 3;
   const full = isDocumentAdminView();
   teamPair(doc).forEach((team) => {
-    if (!full && !isOwnApprovalSlot(role, team)) return;
+    if (!full && !isOwnApprovalSlot(role, team, doc)) return;
     const approval = doc?.approvals?.[key]?.[team];
     const block = document.createElement('section');
     block.className = 'troca-sign-block approval-sign-block';
     const heading = document.createElement('h3');
-    heading.textContent = `Passo ${step} · ${isSupervisor ? 'Supervisor' : 'Chefe de Operações'} — Equipe ${team}`;
+    const side = sideForTeam(doc, team);
+    heading.textContent = isSupervisor
+      ? `Passo ${step} · Supervisor — CPA ${cpaDisplay(side.cpa) || '—'} (Equipe ${team})`
+      : `Passo ${step} · Chefe de Operações — Equipe ${team}`;
     block.appendChild(heading);
     if (isApprovalDenied(approval) || isStepDenied(doc, step)) {
       const denied = document.createElement('p');
@@ -2738,9 +2828,12 @@ function renderDocument(doc) {
 function canViewDocument(doc) {
   if (currentUser?.profile === 'admin') return true;
   if ([doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey)) return true;
-  const team = userTeam(currentUser);
   const profile = userProfile(currentUser);
-  if (teamPair(doc).includes(team) && ['supervisor', 'operations-chief'].includes(profile)) return true;
+  if (profile === 'supervisor') {
+    const myCpa = normalizeCpa(currentUser?.cpa);
+    if (myCpa && partySides(doc).some((side) => side.cpa === myCpa)) return true;
+  }
+  if (profile === 'operations-chief' && teamPair(doc).includes(userTeam(currentUser))) return true;
   const signed = [...Object.values(doc?.approvals?.supervisors || {}), ...Object.values(doc?.approvals?.chiefs || {})];
   return signed.some((item) => item?.userKey === currentUserKey);
 }
@@ -2824,7 +2917,7 @@ async function saveRequesterSignature(canvas) {
     requestAnimationFrame(() => {
       els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((item) => bindSignaturePad(item));
     });
-    setStatus(els.docStatus, 'Passo 1 concluído. Supervisores das duas equipes receberam a solicitação de ciência e assinatura.', 'success');
+    setStatus(els.docStatus, 'Passo 1 concluído. Supervisores das CPAs envolvidas receberam a solicitação de ciência e assinatura.', 'success');
   } catch (error) {
     console.error(error);
     setStatus(els.docStatus, error.message || 'Não foi possível salvar a assinatura.', 'error');
@@ -2933,7 +3026,7 @@ async function saveApprovalSignature(role, team, canvas) {
     setStatus(els.docStatus, refreshed.status === 'completed'
       ? 'Passo 3 concluído. Todos os passos estão ticados e o status é OK.'
       : isSupervisor && refreshed.status === 'step3-chiefs'
-        ? 'Passo 2 concluído. Chefes de Operações das duas equipes receberam a solicitação.'
+        ? 'Passo 2 concluído. Chefes de Operações das equipes envolvidas receberam a solicitação.'
         : `Ciência registrada. ${viewerStepStatus(refreshed)}`, 'success');
   } catch (error) {
     console.error(error);
@@ -2950,10 +3043,9 @@ async function involvedUserKeys(doc) {
     if (item?.userKey) keys.add(item.userKey);
   });
   try {
-    const teams = teamPair(doc);
     const [supervisors, chiefs] = await Promise.all([
-      findApprovers('supervisor', teams),
-      findApprovers('operations-chief', teams)
+      findApproversForDoc('supervisor', doc),
+      findApproversForDoc('operations-chief', doc)
     ]);
     supervisors.forEach((item) => keys.add(item.userKey));
     chiefs.forEach((item) => keys.add(item.userKey));
