@@ -238,7 +238,7 @@ function makeTeamCell(team, iso, column, events, myTeam, trocaInfo) {
   if (isPuxoHere || isFolgoHere) {
     const swapMark = document.createElement('span');
     swapMark.className = `calendar-scale-mark ${isPuxoHere ? 'is-puxo' : 'is-folgo'}`;
-    swapMark.textContent = isPuxoHere ? 'PUXO' : 'FOLGO';
+    swapMark.textContent = isPuxoHere ? 'PUXO' : 'FOLGA';
     td.appendChild(swapMark);
   }
   const event = events[`${iso}:${column}`];
@@ -261,7 +261,7 @@ function updateCalendarTeamHint() {
   if (!hint) return;
   if (currentUserTeam) {
     hint.hidden = false;
-    hint.textContent = `Equipe ${currentUserTeam}: dias de serviço com borda verde. Troca concluída: PUXO no dia extra e FOLGO no dia coberto.`;
+    hint.textContent = `Equipe ${currentUserTeam}: dias de serviço com borda verde. Troca concluída: PUXO no dia extra e FOLGA no dia coberto.`;
   } else {
     hint.hidden = false;
     hint.textContent = 'Faça login para destacar os dias de serviço da sua equipe e as trocas.';
@@ -311,7 +311,7 @@ function renderCalendar() {
     number.title = highlights.has(iso) ? 'Remover marcação' : 'Marcar data em amarelo';
     if (myDuty && !isPuxo) number.title = `Dia de serviço da Equipe ${currentUserTeam}`;
     if (isPuxo) number.title = trocaInfo.label || 'Puxo serviço neste dia';
-    if (isFolgo) number.title = trocaInfo.label || 'Folgo neste dia';
+    if (isFolgo) number.title = trocaInfo.label || 'Folga neste dia';
     else if (trocaInfo && !isPuxo) number.title = `${number.title} · Troca: ${trocaInfo.label}`;
     number.addEventListener('click', () => toggleDateHighlight(iso));
     dayCell.appendChild(number);
@@ -323,8 +323,10 @@ function renderCalendar() {
     }
     if (trocaInfo && !isPuxo && !isFolgo) {
       const trocaBadge = document.createElement('small');
-      trocaBadge.className = 'calendar-troca-badge';
-      trocaBadge.textContent = trocaInfo.shortLabel || 'TROCA';
+      const pendingLabel = String(trocaInfo.shortLabel || 'TROCA').toUpperCase();
+      const pendingClass = pendingLabel === 'PUXO' ? 'is-puxo' : pendingLabel === 'FOLGA' ? 'is-folgo' : '';
+      trocaBadge.className = `calendar-troca-badge${pendingClass ? ` ${pendingClass}` : ''}`;
+      trocaBadge.textContent = pendingLabel;
       dayCell.appendChild(trocaBadge);
     }
 

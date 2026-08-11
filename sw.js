@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'copom-trocas-v9.26';
+const CACHE_NAME = 'copom-trocas-v9.27';
 const APP_SHELL = [
   './',
   './index.html',

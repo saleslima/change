@@ -1160,22 +1160,32 @@ function publishTrocaCalendarDates() {
       dates[iso].completed = true;
       dates[iso].pending = false;
       dates[iso].status = 'completed';
-      dates[iso].shortLabel = effect === 'puxo' ? 'PUXO' : 'FOLGO';
+      dates[iso].shortLabel = effect === 'puxo' ? 'PUXO' : 'FOLGA';
       dates[iso].workTeam = docOrRequest.workTeam || dates[iso].workTeam || '';
       dates[iso].offTeam = docOrRequest.offTeam || dates[iso].offTeam || '';
       dates[iso].label = effect === 'puxo'
         ? `Puxo serviço da Equipe ${dates[iso].workTeam || 'outra'}`
-        : `Folgo — a outra parte cobre a Equipe ${dates[iso].offTeam || 'sua'}`;
+        : `Folga — a outra parte cobre a Equipe ${dates[iso].offTeam || 'sua'}`;
       return;
     }
     if (dates[iso].completed) return;
-    const parts = [];
-    if (dates[iso].kinds.includes('request')) parts.push('dia solicitado');
-    if (dates[iso].kinds.includes('counter')) parts.push('contrapartida');
-    dates[iso].shortLabel = dates[iso].kinds.length > 1
-      ? 'TROCA'
-      : (kind === 'request' ? 'TROCA PEDIDO' : 'TROCA CONTRA');
-    dates[iso].label = `${parts.join(' + ')} · ${docOrRequest?.status === 'completed' ? 'OK' : 'PENDENTE'}`;
+    // Para quem vê o calendário: dia coberto pelo outro = FOLGA; dia em que você trabalha = PUXO.
+    const role = calendarPartyRole(docOrRequest);
+    let shortLabel = 'TROCA';
+    if (dates[iso].kinds.length <= 1) {
+      if (role === 'interested') {
+        shortLabel = kind === 'request' ? 'PUXO' : 'FOLGA';
+      } else {
+        // solicitante (ou visão padrão): pedido = folga; contraproposta = puxo
+        shortLabel = kind === 'request' ? 'FOLGA' : 'PUXO';
+      }
+    }
+    dates[iso].shortLabel = shortLabel;
+    dates[iso].label = shortLabel === 'PUXO'
+      ? `Puxo · ${docOrRequest?.status === 'completed' ? 'OK' : 'PENDENTE'}`
+      : shortLabel === 'FOLGA'
+        ? `Folga · ${docOrRequest?.status === 'completed' ? 'OK' : 'PENDENTE'}`
+        : `Troca · ${docOrRequest?.status === 'completed' ? 'OK' : 'PENDENTE'}`;
     dates[iso].pending = dates[iso].pending || docOrRequest?.status !== 'completed';
   };
 
