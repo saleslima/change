@@ -4118,6 +4118,14 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
   background: linear-gradient(135deg, #ffb347, #ff7a18);
   box-shadow: 0 0 8px rgba(255, 140, 40, .45);
 }
+.legend-swatch.puxo {
+  background: linear-gradient(135deg, #ffb347, #ff7a18);
+  box-shadow: 0 0 8px rgba(255, 140, 40, .45);
+}
+.legend-swatch.folgo {
+  background: linear-gradient(135deg, #7ec8ff, #4bd5ff);
+  box-shadow: 0 0 8px rgba(75, 213, 255, .4);
+}
 .team-calendar tbody tr.is-my-duty .calendar-date-button {
   border: 2px solid #3dff9a;
   box-shadow: 0 0 14px rgba(61, 255, 154, .28), inset 0 0 10px rgba(61, 255, 154, .08);
@@ -4135,6 +4143,51 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 .team-calendar tbody tr.is-troca-day.is-my-duty .calendar-date-button {
   border-color: #ff9a2e;
   box-shadow: 0 0 14px rgba(255, 154, 46, .3), 0 0 0 1px rgba(61, 255, 154, .45);
+}
+.team-calendar tbody tr.is-puxo-day {
+  background: linear-gradient(90deg, rgba(255, 140, 40, .18), rgba(255, 140, 40, .05));
+  box-shadow: inset 4px 0 0 #ff8a1a;
+}
+.team-calendar tbody tr.is-folgo-day {
+  background: linear-gradient(90deg, rgba(75, 213, 255, .16), rgba(75, 213, 255, .04));
+  box-shadow: inset 4px 0 0 #4bd5ff;
+}
+.team-calendar tbody tr.is-folgo-day.is-my-duty .calendar-date-button,
+.team-calendar tbody tr.is-folgo-day .calendar-date-button {
+  border-color: #4bd5ff;
+  box-shadow: 0 0 12px rgba(75, 213, 255, .22);
+}
+.team-calendar tbody tr.is-puxo-day .calendar-date-button {
+  border-color: #ff8a1a;
+  box-shadow: 0 0 12px rgba(255, 138, 26, .28);
+}
+.calendar-scale-mark {
+  display: block;
+  max-width: 100%;
+  margin: 5px auto 0;
+  padding: 2px 4px;
+  border-radius: 999px;
+  font-size: .48rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-scale-mark.is-puxo,
+.calendar-troca-badge.is-puxo {
+  color: #2b1600;
+  background: linear-gradient(135deg, #ffc15c, #ff8a1a);
+}
+.calendar-scale-mark.is-folgo,
+.calendar-troca-badge.is-folgo {
+  color: #042433;
+  background: linear-gradient(135deg, #9be0ff, #4bd5ff);
+}
+.team-duty-cell.is-puxo-team .team-letter {
+  border-color: #ff8a1a;
+  color: #ffe3c2;
+  background: rgba(255, 138, 26, .16);
 }
 .calendar-troca-badge {
   display: inline-block;

@@ -224,14 +224,23 @@ function openTaskMenu(anchor, iso, column) {
   taskMenu = menu;
 }
 
-function makeTeamCell(team, iso, column, events, myTeam) {
+function makeTeamCell(team, iso, column, events, myTeam, trocaInfo) {
   const td = document.createElement('td');
   td.className = 'team-duty-cell';
-  if (myTeam && team === myTeam) td.classList.add('is-my-team');
+  const isPuxoHere = trocaInfo?.effect === 'puxo' && trocaInfo.workTeam === team;
+  const isFolgoHere = trocaInfo?.effect === 'folgo' && (trocaInfo.offTeam === team || myTeam === team);
+  if (isPuxoHere) td.classList.add('is-my-team', 'is-puxo-team');
+  else if (!isFolgoHere && myTeam && team === myTeam) td.classList.add('is-my-team');
   const badge = document.createElement('strong');
   badge.className = 'team-letter';
   badge.textContent = team;
   td.appendChild(badge);
+  if (isPuxoHere || isFolgoHere) {
+    const swapMark = document.createElement('span');
+    swapMark.className = `calendar-scale-mark ${isPuxoHere ? 'is-puxo' : 'is-folgo'}`;
+    swapMark.textContent = isPuxoHere ? 'PUXO' : 'FOLGO';
+    td.appendChild(swapMark);
+  }
   const event = events[`${iso}:${column}`];
   if (event) {
     td.classList.add('has-calendar-event');
@@ -252,7 +261,7 @@ function updateCalendarTeamHint() {
   if (!hint) return;
   if (currentUserTeam) {
     hint.hidden = false;
-    hint.textContent = `Equipe ${currentUserTeam}: dias de serviço com borda verde. Dias de troca marcados em laranja.`;
+    hint.textContent = `Equipe ${currentUserTeam}: dias de serviço com borda verde. Troca concluída: PUXO no dia extra e FOLGO no dia coberto.`;
   } else {
     hint.hidden = false;
     hint.textContent = 'Faça login para destacar os dias de serviço da sua equipe e as trocas.';
@@ -277,8 +286,12 @@ function renderCalendar() {
     const date = new Date(year, month, day, 12);
     const iso = toLocalISO(date);
     const teams = getTeams(date);
-    const myDuty = Boolean(currentUserTeam && teamIsOnDuty(currentUserTeam, date));
     const trocaInfo = trocaCalendarDates[iso] || null;
+    const isPuxo = trocaInfo?.effect === 'puxo';
+    const isFolgo = trocaInfo?.effect === 'folgo';
+    let myDuty = Boolean(currentUserTeam && teamIsOnDuty(currentUserTeam, date));
+    if (isFolgo) myDuty = false;
+    if (isPuxo) myDuty = true;
     const tr = document.createElement('tr');
     tr.dataset.date = iso;
     if (iso === todayIso) tr.classList.add('is-today');
@@ -286,6 +299,8 @@ function renderCalendar() {
     if (holidays.has(iso)) tr.classList.add('is-holiday');
     if (myDuty) tr.classList.add('is-my-duty');
     if (trocaInfo) tr.classList.add('is-troca-day');
+    if (isPuxo) tr.classList.add('is-puxo-day');
+    if (isFolgo) tr.classList.add('is-folgo-day');
 
     const dayCell = document.createElement('td');
     dayCell.className = 'calendar-date-cell';
@@ -294,8 +309,10 @@ function renderCalendar() {
     number.className = 'calendar-date-button';
     number.textContent = String(day).padStart(2, '0');
     number.title = highlights.has(iso) ? 'Remover marcação' : 'Marcar data em amarelo';
-    if (myDuty) number.title = `Dia de serviço da Equipe ${currentUserTeam}`;
-    if (trocaInfo) number.title = `${number.title} · Troca: ${trocaInfo.label}`;
+    if (myDuty && !isPuxo) number.title = `Dia de serviço da Equipe ${currentUserTeam}`;
+    if (isPuxo) number.title = trocaInfo.label || 'Puxo serviço neste dia';
+    if (isFolgo) number.title = trocaInfo.label || 'Folgo neste dia';
+    else if (trocaInfo && !isPuxo) number.title = `${number.title} · Troca: ${trocaInfo.label}`;
     number.addEventListener('click', () => toggleDateHighlight(iso));
     dayCell.appendChild(number);
     if (holidays.has(iso)) {
@@ -306,7 +323,7 @@ function renderCalendar() {
     }
     if (trocaInfo) {
       const trocaBadge = document.createElement('small');
-      trocaBadge.className = 'calendar-troca-badge';
+      trocaBadge.className = `calendar-troca-badge${isPuxo ? ' is-puxo' : ''}${isFolgo ? ' is-folgo' : ''}`;
       trocaBadge.textContent = trocaInfo.shortLabel || 'TROCA';
       dayCell.appendChild(trocaBadge);
     }
@@ -318,8 +335,8 @@ function renderCalendar() {
     tr.append(
       dayCell,
       weekCell,
-      makeTeamCell(teams.day, iso, 'day', events, currentUserTeam),
-      makeTeamCell(teams.night, iso, 'night', events, currentUserTeam)
+      makeTeamCell(teams.day, iso, 'day', events, currentUserTeam, trocaInfo),
+      makeTeamCell(teams.night, iso, 'night', events, currentUserTeam, trocaInfo)
     );
     frag.appendChild(tr);
   }

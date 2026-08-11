@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.12-calendario-responsivo';
+const CACHE_NAME = 'civiloff-v9.13-puxo-folgo';
 const APP_SHELL = [
   './',
   './index.html',

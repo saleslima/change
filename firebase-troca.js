@@ -792,20 +792,44 @@ function renderSignedAdminList() {
   });
 }
 
+function calendarPartyRole(docOrRequest) {
+  if (!currentUserKey || !docOrRequest) return '';
+  if (docOrRequest.partyA?.userKey === currentUserKey || docOrRequest.fromUserKey === currentUserKey) return 'requester';
+  if (docOrRequest.partyB?.userKey === currentUserKey || docOrRequest.selectedBy === currentUserKey) return 'interested';
+  return '';
+}
+
 function publishTrocaCalendarDates() {
   const dates = {};
-  const addDate = (iso, kind, docOrRequest) => {
+  const addDate = (iso, kind, docOrRequest, effect = '') => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return;
     if (!dates[iso]) {
       dates[iso] = {
         kinds: [],
         status: docOrRequest?.status || '',
         pending: docOrRequest?.status !== 'completed',
+        effect: '',
         shortLabel: 'TROCA',
-        label: ''
+        label: '',
+        workTeam: '',
+        offTeam: ''
       };
     }
     if (!dates[iso].kinds.includes(kind)) dates[iso].kinds.push(kind);
+    if (effect === 'puxo' || effect === 'folgo') {
+      dates[iso].effect = effect;
+      dates[iso].completed = true;
+      dates[iso].pending = false;
+      dates[iso].status = 'completed';
+      dates[iso].shortLabel = effect === 'puxo' ? 'PUXO' : 'FOLGO';
+      dates[iso].workTeam = docOrRequest.workTeam || dates[iso].workTeam || '';
+      dates[iso].offTeam = docOrRequest.offTeam || dates[iso].offTeam || '';
+      dates[iso].label = effect === 'puxo'
+        ? `Puxo serviço da Equipe ${dates[iso].workTeam || 'outra'}`
+        : `Folgo — a outra parte cobre a Equipe ${dates[iso].offTeam || 'sua'}`;
+      return;
+    }
+    if (dates[iso].completed) return;
     const parts = [];
     if (dates[iso].kinds.includes('request')) parts.push('dia solicitado');
     if (dates[iso].kinds.includes('counter')) parts.push('contrapartida');
@@ -817,6 +841,20 @@ function publishTrocaCalendarDates() {
   };
 
   Object.values(myDocsCache || {}).forEach((doc) => {
+    if (isDocDenied(doc)) return;
+    const role = calendarPartyRole(doc);
+    if (doc.status === 'completed' && role) {
+      const fromTeam = doc.fromTeam || doc.partyA?.team || '';
+      const otherTeam = doc.interestedTeam || doc.partyB?.team || '';
+      if (role === 'requester') {
+        addDate(doc.requestDate, 'request', { ...doc, offTeam: fromTeam }, 'folgo');
+        addDate(doc.counterDate, 'counter', { ...doc, workTeam: otherTeam }, 'puxo');
+      } else {
+        addDate(doc.requestDate, 'request', { ...doc, workTeam: fromTeam }, 'puxo');
+        addDate(doc.counterDate, 'counter', { ...doc, offTeam: otherTeam }, 'folgo');
+      }
+      return;
+    }
     addDate(doc.requestDate, 'request', doc);
     addDate(doc.counterDate, 'counter', doc);
   });
