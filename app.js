@@ -321,9 +321,9 @@ function renderCalendar() {
       holiday.textContent = holidays.get(iso);
       dayCell.appendChild(holiday);
     }
-    if (trocaInfo) {
+    if (trocaInfo && !isPuxo && !isFolgo) {
       const trocaBadge = document.createElement('small');
-      trocaBadge.className = `calendar-troca-badge${isPuxo ? ' is-puxo' : ''}${isFolgo ? ' is-folgo' : ''}`;
+      trocaBadge.className = 'calendar-troca-badge';
       trocaBadge.textContent = trocaInfo.shortLabel || 'TROCA';
       dayCell.appendChild(trocaBadge);
     }
