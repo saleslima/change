@@ -1,6 +1,6 @@
-# CivilOff PWA — acesso, usuários e turnos
+# Copom trocas PWA — acesso, usuários e turnos
 
-PWA móvel para controle de folgas do COPOM Civil, agora com acesso por CPF e senha, administração de usuários e cadastro de turnos.
+PWA móvel para controle de folgas do Copom trocas, agora com acesso por CPF e senha, administração de usuários e cadastro de turnos.
 
 ## Acesso administrativo inicial
 
@@ -60,7 +60,7 @@ No painel **EmailJS > Email Templates > template_w6zv5bj**, configure:
 
 ```text
 To Email: {{to_email}}
-From Name: CivilOff
+From Name: Copom trocas
 Reply-To: {{reply_to}}
 Subject: {{subject}}
 ```
@@ -71,7 +71,7 @@ No corpo do e-mail, a opção mais simples e compatível é colocar apenas:
 {{message}}
 ```
 
-O CivilOff monta `message` completo com nome, CPF, senha, perfil e turno. Se preferir montar o layout manualmente no EmailJS, também estão disponíveis:
+O Copom trocas monta `message` completo com nome, CPF, senha, perfil e turno. Se preferir montar o layout manualmente no EmailJS, também estão disponíveis:
 
 ```text
 {{to_email}}

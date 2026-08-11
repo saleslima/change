@@ -17,5 +17,5 @@ window.CIVILOFF_EMAIL_CONFIG = Object.freeze({
   templateId: 'template_w6zv5bj',
   senderEmail: 'stqcopomsp@gmail.com',
   fromAddress: 'stqcopomsp@gmail.com',
-  fromName: 'CivilOff'
+  fromName: 'Copom trocas'
 });

@@ -1226,7 +1226,7 @@ function subscribeUsersDirectory() {
       const doc = adminDocsCache[openDocumentId] || myDocsCache[openDocumentId];
       if (doc) renderDocument({ id: openDocumentId, ...doc });
     }
-  }, (error) => console.warn('[CivilOff] Cadastro para identidade da troca:', error));
+  }, (error) => console.warn('[Copom trocas] Cadastro para identidade da troca:', error));
 }
 
 function subscribeInbox() {
@@ -1248,7 +1248,7 @@ function subscribeInbox() {
     inboxCache = snapshot.val() || {};
     refreshInboxBadge();
     if (els.inboxDialog?.open) renderInboxPanel();
-  }, (error) => console.warn('[CivilOff] Inbox de troca:', error));
+  }, (error) => console.warn('[Copom trocas] Inbox de troca:', error));
 
   unsubscribeMyDocs = onValue(ref(database, TROCAS_DOCS_PATH), (snapshot) => {
     const all = snapshot.val() || {};
@@ -1262,7 +1262,7 @@ function subscribeInbox() {
     publishTrocaCalendarDates();
     refreshInboxBadge();
     if (els.inboxDialog?.open) renderVigentesList();
-  }, (error) => console.warn('[CivilOff] Documentos vigentes:', error));
+  }, (error) => console.warn('[Copom trocas] Documentos vigentes:', error));
 
   unsubscribeMyRequests = onValue(ref(database, TROCAS_REQUESTS_PATH), (snapshot) => {
     const all = snapshot.val() || {};
@@ -1276,7 +1276,7 @@ function subscribeInbox() {
     publishTrocaCalendarDates();
     refreshInboxBadge();
     if (els.inboxDialog?.open) renderVigentesList();
-  }, (error) => console.warn('[CivilOff] Pedidos vigentes:', error));
+  }, (error) => console.warn('[Copom trocas] Pedidos vigentes:', error));
 }
 
 function subscribeAdminRequests() {
@@ -2853,7 +2853,7 @@ async function openDocument(documentId) {
       [doc.partyA?.userKey, doc.partyB?.userKey].includes(currentUserKey)
       && isWithinFulfillmentWindow(doc.requestDate, doc.counterDate)
     ) {
-      upsertPartyTracking(doc).catch((error) => console.warn('[CivilOff] tracking:', error));
+      upsertPartyTracking(doc).catch((error) => console.warn('[Copom trocas] tracking:', error));
     }
     requestAnimationFrame(() => {
       els.docSignAreas?.querySelectorAll('canvas.troca-signature-canvas').forEach((canvas) => bindSignaturePad(canvas));
@@ -3050,7 +3050,7 @@ async function involvedUserKeys(doc) {
     supervisors.forEach((item) => keys.add(item.userKey));
     chiefs.forEach((item) => keys.add(item.userKey));
   } catch (error) {
-    console.warn('[CivilOff] envolvidos da troca:', error);
+    console.warn('[Copom trocas] envolvidos da troca:', error);
   }
   return [...keys];
 }
@@ -3195,7 +3195,7 @@ async function buildDocumentPdf(doc) {
   let y = 20;
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
-  pdf.text('Termo de troca de serviço — CivilOff', margin, y);
+  pdf.text('Termo de troca de serviço — Copom trocas', margin, y);
   y += 9;
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(10);

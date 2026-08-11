@@ -1,4 +1,4 @@
-# CivilOff — integração N-DIT (v9)
+# Copom trocas — integração N-DIT (v9)
 
 ## Fluxo de troca (timeline em 3 passos)
 

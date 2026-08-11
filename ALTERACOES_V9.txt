@@ -1,4 +1,4 @@
-CivilOff N-DIT v9 — alterações na pasta civil02-integrado
+Copom trocas N-DIT v9 — alterações na pasta civil02-integrado
 
 - Contraproposta usa calendário da escala da equipe do interessado.
 - Apenas dias em que a equipe está de serviço ficam selecionáveis; demais ficam foscos.

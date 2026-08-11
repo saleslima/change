@@ -366,13 +366,13 @@ function buildPasswordEmailContent({ user, password, purpose }) {
   const teamText = teamLabel(userTeam(user));
   const config = getEmailConfig();
   const senderEmail = config.fromAddress || config.senderEmail || 'stqcopomsp@gmail.com';
-  const fromName = config.fromName || 'CivilOff';
-  const subject = `${purpose} — CivilOff`;
+  const fromName = config.fromName || 'Copom trocas';
+  const subject = `${purpose} — Copom trocas`;
   const loginLabel = identifier.type === 're' ? 'RE' : 'CPF';
   const message = [
     `Olá, ${user.warName || user.name}.`,
     '',
-    `Seu acesso ao CivilOff foi ${purpose === 'Cadastro de usuário' ? 'criado' : 'atualizado'}.`,
+    `Seu acesso ao Copom trocas foi ${purpose === 'Cadastro de usuário' ? 'criado' : 'atualizado'}.`,
     `${loginLabel}: ${identifier.masked}`,
     `SENHA DE ACESSO: ${password}`,
     `Posto/graduação: ${rankLabel(user.rank)}`,
@@ -410,7 +410,7 @@ function buildPasswordEmailContent({ user, password, purpose }) {
     team: teamText,
     equipe: teamText,
     purpose,
-    app_name: 'CivilOff',
+    app_name: 'Copom trocas',
     from_email: senderEmail,
     reply_to: senderEmail,
     subject,
@@ -494,7 +494,7 @@ async function sendPasswordEmailViaFormSubmit({ to, subject, message, replyTo })
       Accept: 'application/json'
     },
     body: JSON.stringify({
-      name: 'CivilOff',
+      name: 'Copom trocas',
       email: replyTo || 'noreply@civiloff.app',
       _replyto: replyTo || '',
       _subject: subject,
@@ -570,7 +570,7 @@ async function sendPasswordEmail({ user, password, purpose }) {
     message,
     reply_to: senderEmail,
     from_email: senderEmail,
-    app_name: 'CivilOff',
+    app_name: 'Copom trocas',
     purpose,
     password: accessPassword,
     passcode: accessPassword,
@@ -1371,7 +1371,7 @@ function showIssuedPassword({ target, email, password, emailed, prefix, identifi
   actions.appendChild(copyButton);
 
   const shareText = [
-    'Acesso CivilOff',
+    'Acesso Copom trocas',
     identifier ? `RE: ${identifier}` : '',
     `E-mail: ${email}`,
     `Senha: ${accessPassword}`
@@ -1490,7 +1490,7 @@ async function initialize() {
     const restored = await restoreSession();
     if (!restored) showLogin();
   } catch (error) {
-    console.error('CivilOff Firebase error:', error);
+    console.error('Copom trocas Firebase error:', error);
     const permissionDenied = error?.code === 'PERMISSION_DENIED' || error?.code === 'permission-denied';
     const writeFailed = error?.code === 'WRITE_NOT_CONFIRMED';
     let detail = 'Verifique a internet e a configuração do Firebase. Depois recarregue a página.';

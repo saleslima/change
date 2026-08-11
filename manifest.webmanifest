@@ -1,7 +1,7 @@
 {
-  "name": "CivilOff",
-  "short_name": "CivilOff",
-  "description": "CivilOff — escala de equipes e trocas de serviço com propostas, assinaturas e funcionamento offline.",
+  "name": "Copom trocas",
+  "short_name": "Copom trocas",
+  "description": "Copom trocas — escala de equipes e trocas de serviço com propostas, assinaturas e funcionamento offline.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

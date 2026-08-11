@@ -22,5 +22,5 @@ export const firebaseApp = getApps().some((app) => app.name === APP_NAME)
 export const database = getDatabase(firebaseApp, firebaseConfig.databaseURL);
 
 if (typeof console !== 'undefined') {
-  console.info('[CivilOff] Firebase:', firebaseConfig.projectId, firebaseConfig.databaseURL);
+  console.info('[Copom trocas] Firebase:', firebaseConfig.projectId, firebaseConfig.databaseURL);
 }

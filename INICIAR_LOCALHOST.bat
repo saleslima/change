@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 echo.
 echo ==========================================
-echo   CivilOff N-DIT - Servidor localhost
+echo   Copom trocas N-DIT - Servidor localhost
 ECHO ==========================================
 echo.
 where python >nul 2>nul

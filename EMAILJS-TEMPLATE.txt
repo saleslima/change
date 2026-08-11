@@ -1,4 +1,4 @@
-CIVILOFF - CONFIGURAÇÃO DO TEMPLATE EMAILJS
+Copom trocas - CONFIGURAÇÃO DO TEMPLATE EMAILJS
 ============================================
 
 Template ID: template_w6zv5bj
@@ -6,7 +6,7 @@ Template ID: template_w6zv5bj
 No painel EmailJS, configure os campos do template assim:
 
 To Email: {{to_email}}
-From Name: CivilOff
+From Name: Copom trocas
 Reply-To: {{reply_to}}
 Subject: {{subject}}
 

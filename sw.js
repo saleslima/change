@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'civiloff-v9.24-aprovacao-cpa';
+const CACHE_NAME = 'copom-trocas-v9.26';
 const APP_SHELL = [
   './',
   './index.html',

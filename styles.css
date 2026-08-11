@@ -1697,7 +1697,7 @@ html[data-theme="light"] .glass-card {
 }
 
 
-/* CivilOff v4 — modos 190/193, pensamento diário e contador local */
+/* Copom trocas v4 — modos 190/193, pensamento diário e contador local */
 .user-counter {
   display: grid;
   grid-template-columns: 28px auto;
@@ -2215,7 +2215,7 @@ html[data-operation-mode="193"] .dialog-cancel {
   }
 }
 
-/* CivilOff v4.3 — chama GIF do usuário */
+/* Copom trocas v4.3 — chama GIF do usuário */
 .fire-layer {
   display: none;
   align-items: stretch;
@@ -2241,7 +2241,7 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   display: flex;
 }
 
-/* CivilOff v4.6.1 — controles na mesma linha no celular */
+/* Copom trocas v4.6.1 — controles na mesma linha no celular */
 @media (max-width: 520px) {
   .topbar {
     flex-wrap: nowrap;
@@ -2345,7 +2345,7 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   }
 }
 
-/* CivilOff v6 — acesso por CPF, administração de usuários e turnos */
+/* Copom trocas v6 — acesso por CPF, administração de usuários e turnos */
 .auth-screen {
   display: grid;
   min-height: 100vh;
@@ -3830,7 +3830,7 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
   .thought-marquee span { animation-duration: 16s; }
 }
 
-/* ===== CivilOff N-DIT v9: contraproposta por escala + timeline 3 passos ===== */
+/* ===== Copom trocas N-DIT v9: contraproposta por escala + timeline 3 passos ===== */
 .field-hint {
   display: block;
   margin-top: 6px;
