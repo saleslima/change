@@ -1006,6 +1006,9 @@ footer strong { color: #9db2c4; }
 .calendar-panel {
   padding: 18px 14px 17px;
   touch-action: pan-y;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .calendar-toolbar {
@@ -3428,9 +3431,9 @@ html[data-theme="light"] .admin-list-card {
 /* ===== N-DIT: calendário de equipes + trocas por propostas ===== */
 .team-calendar-scroll {
   width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   border: 1px solid rgba(var(--neon-rgb), .16);
   border-radius: 18px;
   background: rgba(4, 13, 25, .52);
@@ -3443,10 +3446,15 @@ html[data-theme="light"] .team-calendar-scroll {
 
 .team-calendar {
   width: 100%;
-  min-width: 650px;
+  min-width: 0;
+  max-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
+}
+
+.team-calendar .th-short {
+  display: none;
 }
 
 .team-calendar th,
@@ -3456,6 +3464,8 @@ html[data-theme="light"] .team-calendar-scroll {
   border-right: 1px solid rgba(var(--neon-rgb), .11);
   border-bottom: 1px solid rgba(var(--neon-rgb), .10);
   position: relative;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .team-calendar th:last-child,
@@ -3502,15 +3512,17 @@ html[data-theme="light"] .team-calendar th {
   font-size: .95rem;
 }
 
-.calendar-date-cell { width: 24%; }
+.calendar-date-cell { width: 22%; }
 .calendar-date-button {
   position: relative;
   appearance: none;
   border: 1px solid rgba(var(--neon-rgb), .22);
   border-radius: 11px;
-  min-width: 46px;
+  min-width: 0;
+  width: 100%;
+  max-width: 52px;
   min-height: 38px;
-  padding: 7px 10px;
+  padding: 7px 6px;
   color: inherit;
   background: rgba(var(--neon-rgb), .07);
   font: 800 .94rem/1 system-ui, sans-serif;
@@ -3535,11 +3547,15 @@ html[data-theme="light"] .team-calendar th {
 
 .calendar-holiday-name {
   display: block;
+  max-width: 100%;
   margin-top: 6px;
   color: #ff7e87;
   font-size: .59rem;
   font-weight: 750;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .weekend-cell { opacity: .78; font-weight: 720; }
@@ -3567,9 +3583,9 @@ html[data-theme="light"] .team-calendar th {
 .has-calendar-event { box-shadow: inset 0 -2px 0 #ff9f1c; }
 .calendar-event-marker {
   display: block;
-  max-width: 130px;
+  max-width: 100%;
   margin: 6px auto 0;
-  padding: 3px 6px;
+  padding: 3px 4px;
   overflow: hidden;
   border-radius: 999px;
   color: #2b1900;
@@ -3683,17 +3699,41 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 
 @media (max-width: 720px) {
   .team-calendar-scroll { border-radius: 14px; }
-  .team-calendar { min-width: 590px; }
-  .team-calendar th, .team-calendar td { padding: 10px 7px; }
+  .team-calendar { min-width: 0; }
+  .team-calendar .th-long { display: none; }
+  .team-calendar .th-short { display: inline; }
+  .team-calendar th, .team-calendar td { padding: 8px 3px; }
+  .team-calendar th { font-size: .56rem; letter-spacing: .04em; }
+  .calendar-date-button {
+    max-width: 44px;
+    min-height: 32px;
+    padding: 5px 2px;
+    font-size: .8rem;
+    border-radius: 8px;
+  }
+  .team-letter { width: 28px; height: 28px; font-size: .78rem; }
+  .calendar-holiday-name,
+  .calendar-troca-badge,
+  .calendar-event-marker {
+    max-width: 100%;
+    font-size: .48rem;
+    padding-inline: 4px;
+  }
+  .team-calendar tbody tr.is-today .calendar-date-button::after {
+    top: -6px;
+    right: -4px;
+    font-size: .72rem;
+  }
   .team-choice-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .thought-marquee span { animation-duration: 18s; }
 }
 
 @media (max-width: 420px) {
-  .team-calendar { min-width: 555px; }
-  .team-calendar th { font-size: .59rem; }
-  .team-letter { width: 32px; height: 32px; }
-  .calendar-date-button { min-width: 42px; min-height: 35px; }
+  .team-calendar { min-width: 0; }
+  .team-calendar th { font-size: .52rem; }
+  .team-calendar th, .team-calendar td { padding: 6px 2px; }
+  .team-letter { width: 26px; height: 26px; font-size: .72rem; }
+  .calendar-date-button { max-width: 40px; min-height: 30px; font-size: .74rem; }
   .team-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .thought-marquee { max-width: calc(100vw - 52px); }
   .thought-marquee span { animation-duration: 16s; }
@@ -3719,6 +3759,9 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 .proposal-calendar-shell {
   margin: 18px 0;
   padding: 14px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   border: 1px solid rgba(var(--neon-rgb, 75, 213, 255), .24);
   border-radius: 18px;
   background: rgba(5, 18, 31, .44);
@@ -4095,8 +4138,12 @@ html[data-theme="light"] .calendar-task-menu { background: rgba(247,252,255,.98)
 }
 .calendar-troca-badge {
   display: inline-block;
+  max-width: 100%;
   margin-top: 6px;
-  padding: 3px 7px;
+  padding: 3px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border-radius: 999px;
   color: #2b1600;
   background: linear-gradient(135deg, #ffc15c, #ff9f1c);

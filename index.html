@@ -33,7 +33,7 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="styles.css?v=911">
+  <link rel="stylesheet" href="styles.css?v=912">
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -199,16 +199,25 @@
             <thead>
               <tr>
                 <th>Dia</th>
-                <th>Dia da semana</th>
-                <th>Equipe Dia</th>
-                <th>Equipe Noite</th>
+                <th>
+                  <span class="th-long">Semana</span>
+                  <span class="th-short">Sem.</span>
+                </th>
+                <th>
+                  <span class="th-long">Equipe Dia</span>
+                  <span class="th-short">Dia</span>
+                </th>
+                <th>
+                  <span class="th-long">Equipe Noite</span>
+                  <span class="th-short">Noite</span>
+                </th>
               </tr>
             </thead>
             <tbody id="teamCalendarBody"></tbody>
           </table>
         </div>
 
-        <p class="swipe-hint">Deslize a tabela no celular. Use as setas para mudar o mês.</p>
+        <p class="swipe-hint">Use as setas para mudar o mês.</p>
         <button id="todayButton" class="text-button" type="button">Ir para hoje</button>
       </section>
     </main>
@@ -565,10 +574,10 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="email-config.js?v=911"></script>
-  <script type="module" src="firebase-devices.js?v=911"></script>
-  <script type="module" src="access-admin.js?v=911"></script>
-  <script type="module" src="firebase-troca.js?v=911"></script>
-  <script src="app.js?v=911" defer></script>
+  <script src="email-config.js?v=912"></script>
+  <script type="module" src="firebase-devices.js?v=912"></script>
+  <script type="module" src="access-admin.js?v=912"></script>
+  <script type="module" src="firebase-troca.js?v=912"></script>
+  <script src="app.js?v=912" defer></script>
 </body>
 </html>
