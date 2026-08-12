@@ -711,7 +711,7 @@ function renderVigentesList() {
     const meta = document.createElement('p');
     meta.className = 'troca-message-meta';
     const detail = document.createElement('p');
-    detail.className = 'troca-message-from';
+    detail.className = 'troca-message-from troca-party-info';
 
     const iAmRequester = doc.partyA?.userKey === currentUserKey;
     const other = iAmRequester ? doc.partyB : doc.partyA;
@@ -921,7 +921,7 @@ function renderInboxList() {
     const meta = document.createElement('p');
     meta.className = 'troca-message-meta';
     const detail = document.createElement('p');
-    detail.className = 'troca-message-from';
+    detail.className = 'troca-message-from troca-party-info';
 
     if (message.kind === 'proposal') {
       title.textContent = `Contraproposta de ${officerLine(proposerIdentity(message), 'Interessado')}`;
@@ -2700,9 +2700,14 @@ function renderPartyBlock(doc, partyKey) {
   const block = document.createElement('section');
   block.className = 'troca-sign-block';
   const heading = document.createElement('h3');
-  heading.textContent = `Passo 1 · ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} — ${officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name)}`;
+  const roleName = partyKey === 'partyA' ? 'Solicitante' : 'Interessado';
+  const identity = officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name);
+  const identityEl = document.createElement('span');
+  identityEl.className = 'troca-party-info';
+  identityEl.textContent = identity;
+  heading.append(document.createTextNode(`Passo 1 · ${roleName} — `), identityEl);
   const role = document.createElement('p');
-  role.className = 'troca-message-from';
+  role.className = 'troca-message-from troca-party-info';
   role.textContent = dutyLine({
     cpa: party.cpa,
     roles: party.roles,
@@ -2715,7 +2720,7 @@ function renderPartyBlock(doc, partyKey) {
     if (allowed) {
       const canvas = document.createElement('canvas');
       canvas.className = 'troca-signature-canvas';
-      canvas.setAttribute('aria-label', `Assine aqui, ${officerLine(pickIdentity(party || {}, party?.userKey || ''), party.warName || party.name)}`);
+      canvas.setAttribute('aria-label', `Assine aqui, ${identity}`);
       block.appendChild(canvas);
       const actions = document.createElement('div');
       actions.className = 'troca-message-actions';
@@ -2726,7 +2731,7 @@ function renderPartyBlock(doc, partyKey) {
     } else {
       const waiting = document.createElement('p');
       waiting.className = 'troca-inbox-empty';
-      waiting.textContent = `PENDENTE: ${partyKey === 'partyA' ? 'Solicitante' : 'Interessado'} ${personLabel(party)} · Equipe ${party.team || '—'}.`;
+      waiting.textContent = `PENDENTE: ${roleName} ${personLabel(party)} · Equipe ${party.team || '—'}.`;
       block.appendChild(waiting);
     }
   }
@@ -2806,23 +2811,24 @@ function renderDocument(doc) {
   els.docSignAreas.replaceChildren();
   const full = isDocumentAdminView();
   const rows = [
-    ['Dia solicitado', formatDateBr(doc.requestDate)],
-    ['Dia da contraproposta', formatDateBr(doc.counterDate)],
-    ['Equipes', `Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`],
-    ['Solicitante', personLabel(doc.partyA, '—')],
-    ['Lotação do solicitante', dutyLine(requesterDutyFrom(doc)) || '—'],
-    ['Interessado', personLabel(doc.partyB, '—')],
-    ['Lotação do interessado', dutyLine(interestedDutyFrom(doc)) || '—'],
-    ['Status', doc.status === 'completed' ? 'OK' : isDocDenied(doc) ? 'INDEFERIDO' : 'PENDENTE'],
-    [full ? 'Quem está pendente' : 'Andamento', viewerStepStatus(doc)]
+    ['Dia solicitado', formatDateBr(doc.requestDate), false],
+    ['Dia da contraproposta', formatDateBr(doc.counterDate), false],
+    ['Equipes', `Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`, true],
+    ['Solicitante', personLabel(doc.partyA, '—'), true],
+    ['Lotação do solicitante', dutyLine(requesterDutyFrom(doc)) || '—', true],
+    ['Interessado', personLabel(doc.partyB, '—'), true],
+    ['Lotação do interessado', dutyLine(interestedDutyFrom(doc)) || '—', true],
+    ['Status', doc.status === 'completed' ? 'OK' : isDocDenied(doc) ? 'INDEFERIDO' : 'PENDENTE', false],
+    [full ? 'Quem está pendente' : 'Andamento', viewerStepStatus(doc), false]
   ];
-  rows.forEach(([label, value]) => {
+  rows.forEach(([label, value, highlight]) => {
     const item = document.createElement('div');
     item.className = 'troca-doc-row';
     const dt = document.createElement('span');
     dt.textContent = label;
     const dd = document.createElement('strong');
     dd.textContent = value;
+    if (highlight) dd.className = 'troca-party-info';
     item.append(dt, dd);
     els.docMeta.appendChild(item);
   });
@@ -3198,36 +3204,108 @@ async function loadDocumentById(documentId) {
   return doc ? { id: documentId, ...doc } : null;
 }
 
+function pdfEnsureSpace(pdf, y, need = 40, margin = 16) {
+  if (y + need <= 285) return y;
+  pdf.addPage();
+  return margin + 4;
+}
+
+function pdfWritePartyBlock(pdf, margin, y, title, person, duty) {
+  const identity = officerLine(person, person?.name || person?.warName || '—');
+  const lotacao = dutyLine(duty) || (duty?.team ? `Equipe ${duty.team}` : '—');
+  const detail = [identity, lotacao].filter(Boolean);
+
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  y = pdfEnsureSpace(pdf, y, 28, margin);
+  pdf.text(title, margin, y);
+  y += 6;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(10);
+  detail.forEach((line) => {
+    y = pdfEnsureSpace(pdf, y, 8, margin);
+    const wrapped = pdf.splitTextToSize(line, 178);
+    wrapped.forEach((row) => {
+      pdf.text(row, margin, y);
+      y += 5.2;
+    });
+  });
+  return y + 3;
+}
+
 async function buildDocumentPdf(doc) {
   const JsPDF = await loadJsPdf();
   const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
   const margin = 16;
   let y = 20;
+  pdf.setTextColor(0, 0, 0);
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
   pdf.text('Termo de troca de serviço — Copom trocas', margin, y);
   y += 9;
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(10);
-  const lines = [
+  const headerLines = [
     `Status: ${doc.status === 'completed' ? 'OK — 3 passos concluídos' : isDocDenied(doc) ? `INDEFERIDO — ${publicStepStatus(doc)}` : pendingDetail(doc)}`,
     `Dia solicitado: ${formatDateBr(doc.requestDate)}`,
     `Dia da contraproposta: ${formatDateBr(doc.counterDate)}`,
-    `Solicitante: ${officerLine(requesterIdentity(doc), doc.partyA?.name || '—')} — ${dutyLine(requesterDutyFrom(doc)) || `Equipe ${doc.fromTeam || '—'}`}`,
-    `Interessado: ${officerLine(proposerIdentity(doc), doc.partyB?.name || '—')} — ${dutyLine(interestedDutyFrom(doc)) || `Equipe ${doc.interestedTeam || '—'}`}`
+    `Equipes da troca: Equipe ${doc.fromTeam || '—'} ↔ Equipe ${doc.interestedTeam || '—'}`
   ];
-  lines.forEach((line) => { pdf.text(line, margin, y); y += 6; });
-  y += 4;
-  const addSignature = (label, signer) => {
-    pdf.setFont('helvetica', 'bold');
-    const denied = isApprovalDenied(signer);
-    pdf.text(`${label}: ${denied ? `INDEFERIDO — ${officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || '—')}` : officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || 'Pendente')}`, margin, y);
-    y += 4;
-    if (signer?.signature) {
-      try { pdf.addImage(signer.signature, 'JPEG', margin, y, 74, 28); y += 32; } catch { y += 6; }
-    } else { y += 5; }
-    if (y > 260) { pdf.addPage(); y = 20; }
+  headerLines.forEach((line) => {
+    y = pdfEnsureSpace(pdf, y, 8, margin);
+    pdf.text(line, margin, y);
+    y += 6;
+  });
+  y += 2;
+
+  const partyA = {
+    ...(doc.partyA || {}),
+    ...requesterIdentity(doc)
   };
+  const partyB = {
+    ...(doc.partyB || {}),
+    ...proposerIdentity(doc)
+  };
+  y = pdfWritePartyBlock(pdf, margin, y, 'Solicitante (interessado na troca)', partyA, requesterDutyFrom(doc));
+  y = pdfWritePartyBlock(pdf, margin, y, 'Contraparte (interessado na troca)', partyB, interestedDutyFrom(doc));
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(12);
+  y = pdfEnsureSpace(pdf, y, 10, margin);
+  pdf.text('Assinaturas (todas as fases)', margin, y);
+  y += 8;
+
+  const addSignature = (label, signer) => {
+    y = pdfEnsureSpace(pdf, y, signer?.signature ? 42 : 14, margin);
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    const denied = isApprovalDenied(signer);
+    const who = denied
+      ? `INDEFERIDO — ${officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || '—')}`
+      : officerLine(pickIdentity(signer || {}, signer?.userKey || ''), signer?.name || signer?.warName || 'Pendente');
+    pdf.text(`${label}: ${who}`, margin, y);
+    y += 5;
+    if (signer?.signature) {
+      try {
+        const format = String(signer.signature).startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        pdf.addImage(signer.signature, format, margin, y, 90, 32);
+        y += 36;
+      } catch {
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(9);
+        pdf.text('(Assinatura registrada — falha ao renderizar a imagem neste PDF)', margin, y);
+        y += 8;
+      }
+    } else {
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      pdf.text('Sem assinatura nesta fase.', margin, y);
+      y += 8;
+    }
+  };
+
   addSignature('Passo 1 — Interessado', doc.partyB);
   addSignature('Passo 1 — Solicitante', doc.partyA);
   teamPair(doc).forEach((team) => addSignature(`Passo 2 — Supervisor Equipe ${team}`, doc.approvals?.supervisors?.[team]));

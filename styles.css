@@ -2922,6 +2922,19 @@ html[data-operation-mode="193"].water-phase .calendar-day.double-off .fire-layer
   margin-top: 4px;
 }
 
+.troca-party-info {
+  color: #d32f2f !important;
+  font-weight: 700;
+}
+
+.troca-doc-row strong.troca-party-info {
+  text-align: right;
+}
+
+.troca-sign-block h3 .troca-party-info {
+  font-weight: 800;
+}
+
 .troca-message-actions {
   display: flex;
   flex-wrap: wrap;
